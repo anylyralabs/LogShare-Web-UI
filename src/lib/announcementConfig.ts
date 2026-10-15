@@ -12,22 +12,22 @@ export interface AnnouncementConfig {
 }
 
 export const announcementConfig: AnnouncementConfig = {
-  id: '20260913_telemetry_terms_notice',
-  title: 'LogShare 更新公告',
+  id: '20261015_entity_rename_notice',
+  title: '关于 LogShare 的运营主体变更通知',
   content:
-    '新版本已内置自研遥测SDK，用于采集 Core Web Vitals、API时延等性能数据，帮助我们优化访问速度与稳定性；相关《服务协议》和《隐私政策》已同步更新，请留意查看。\n\n继续使用即视为知悉，如不同意可停止使用，感谢支持～',
+    'LogShare 的运营主体已由 NingZeStudio（柠泽工作室）更名为 AnyLyraLabs。\n\n望周知。',
   links: [
     {
-      label: '服务协议',
-      url: 'https://logshare.cn/terms',
-      icon: 'FileText',
+      label: '开源仓库（CNB）',
+      url: 'https://cnb.cool/MornZe-Dev/LogShare',
+      icon: 'Github',
       color: 'blue'
     },
     {
-      label: '隐私政策',
-      url: 'https://logshare.cn/privacy',
-      icon: 'Shield',
-      color: 'green'
+      label: 'GitHub 只读镜像',
+      url: 'https://github.com/anylyralabs/LogShare',
+      icon: 'Github',
+      color: 'zinc'
     }
   ]
 }

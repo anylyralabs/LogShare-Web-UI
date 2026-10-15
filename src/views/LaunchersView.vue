@@ -221,7 +221,7 @@ const getPlatformIcon = (platforms: string[]) => {
         </AppButton>
         <AppButton
           as="a"
-          href="https://github.com/NingZeStudio/LogShare"
+          href="https://cnb.cool/MornZe-Dev/LogShare"
           target="_blank"
           rel="noopener noreferrer"
           variant="outline"
@@ -229,6 +229,17 @@ const getPlatformIcon = (platforms: string[]) => {
         >
           <Github weight="duotone" class="h-3.5 w-3.5" />
           <span>查看后端开源实现</span>
+        </AppButton>
+        <AppButton
+          as="a"
+          href="https://github.com/anylyralabs/LogShare"
+          target="_blank"
+          rel="noopener noreferrer"
+          variant="outline"
+          size="sm"
+        >
+          <Github weight="duotone" class="h-3.5 w-3.5" />
+          <span>GitHub 只读镜像</span>
         </AppButton>
       </div>
     </div>

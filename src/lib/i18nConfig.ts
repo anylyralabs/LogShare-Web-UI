@@ -194,7 +194,7 @@ export const zhCN = {
   team_homepage: '团队主页',
   group_list: 'QQ群列表',
   launchers: '接入启动器',
-  join_qq_group: '加入群聊【『甲』柠泽工作室答疑解惑群(所有)】',
+  join_qq_group: '加入群聊【『甲』AnyLyraLabs 答疑解惑群(所有)】',
   easter_egg_title: '私货',
   easter_egg_hint: '这些是给最细心的探索者的特别奖励~',
 
@@ -464,7 +464,7 @@ export const zhTW = {
   team_homepage: '團隊主頁',
   group_list: 'QQ群列表',
   launchers: '接入啟動器',
-  join_qq_group: '加入群聊【『甲』檸澤工作室答疑解惑群(所有)】',
+  join_qq_group: '加入群聊【『甲』AnyLyraLabs 答疑解惑群(所有)】',
   easter_egg_title: '私貨',
   easter_egg_hint: '這些是給最細心的探索者的特別獎勵~',
 

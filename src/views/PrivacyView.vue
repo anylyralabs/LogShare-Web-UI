@@ -399,12 +399,12 @@ const sections = [
           <li>
             官方开源社区反馈：
             <a
-              href="https://github.com/NingZeStudio/"
+              href="https://github.com/anylyralabs/"
               target="_blank"
               rel="noopener noreferrer"
               class="text-primary hover:underline"
             >
-              GitHub NingZeStudio
+              GitHub AnyLyraLabs
             </a>
           </li>
           <li>

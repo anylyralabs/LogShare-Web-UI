@@ -70,7 +70,7 @@ CHANGELOG.md          更新日志
 
 ## 相关项目
 
-- [LogShare](https://github.com/NingZeStudio/LogShare) — 后端 API（PHP）
+- [LogShare](https://cnb.cool/MornZe-Dev/LogShare) — 后端 API（PHP），GitHub 只读镜像：[anylyralabs/LogShare](https://github.com/anylyralabs/LogShare)
 
 ## 许可
 

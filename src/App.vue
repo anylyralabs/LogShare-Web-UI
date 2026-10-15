@@ -235,7 +235,7 @@ onUnmounted(() => {
                 QQ 群
               </a>
               <a
-                href="https://github.com/NingZeStudio/"
+                href="https://github.com/anylyralabs/"
                 target="_blank"
                 rel="noopener noreferrer"
                 class="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-primary hover:underline"
