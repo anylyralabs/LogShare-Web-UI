@@ -27,7 +27,6 @@ export function useLogViewer(logId: string) {
   const originalLogText = ref('')
   const selectedFile = ref('')
   const fileSwitching = ref(false)
-  const problemsSection = ref<HTMLElement | null>(null)
 
   const addNotification = (type: 'success' | 'error', message: string) => {
     if (type === 'success') toast.success(message)
@@ -260,7 +259,6 @@ export function useLogViewer(logId: string) {
     originalLogText,
     selectedFile,
     fileSwitching,
-    problemsSection,
     init,
     loadLog,
     selectFile,

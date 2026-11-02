@@ -134,13 +134,18 @@ const solvableCount = computed(
   () => problems.value.filter((problem: any) => problem.solutions?.length).length
 )
 
-// 模板字符串 ref 无法写入 composable 里的嵌套 ref，这里用函数 ref 绑定
-const setProblemsSection = (el: unknown) => {
-  viewer.problemsSection.value = el instanceof HTMLElement ? el : null
+// 桌面端默认展开问题详情，移动端默认收起，避免把日志正文推得太远
+const showProblemDetails = ref(
+  typeof window !== 'undefined' && window.matchMedia('(min-width: 768px)').matches
+)
+
+const toggleProblemDetails = () => {
+  showProblemDetails.value = !showProblemDetails.value
 }
 
-const scrollToProblems = () => {
-  viewer.problemsSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+const jumpToProblemLine = (line?: number) => {
+  if (!line) return
+  virtualLogRef.value?.scrollToLine(line)
 }
 
 const HELP_TIP_DISMISS_KEY = 'log_help_tip_dismissed'
@@ -269,7 +274,7 @@ const onFileChange = async () => {
           </div>
         </div>
 
-        <!-- 问题概览 -->
+        <!-- 问题概览与详情 -->
         <div v-if="!viewer.isFullscreen.value && problems.length > 0" class="px-4">
           <div
             class="mt-2 mb-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-2.5"
@@ -306,11 +311,63 @@ const onFileChange = async () => {
 
             <button
               class="order-2 ml-auto inline-flex items-center gap-1 rounded-md px-2 py-1 text-sm font-medium text-primary transition-colors hover:bg-primary/5 sm:order-3"
-              @click="scrollToProblems"
+              :aria-expanded="showProblemDetails"
+              aria-controls="problem-details"
+              @click="toggleProblemDetails"
             >
-              {{ t('view_details') }}
-              <ArrowDown weight="duotone" class="h-3.5 w-3.5" />
+              {{ showProblemDetails ? t('hide_details') : t('view_details') }}
+              <ArrowUp
+                v-if="showProblemDetails"
+                weight="duotone"
+                class="h-3.5 w-3.5"
+              />
+              <ArrowDown v-else weight="duotone" class="h-3.5 w-3.5" />
             </button>
+          </div>
+
+          <div
+            v-show="showProblemDetails"
+            id="problem-details"
+            class="mb-2 rounded-lg border border-border/60 bg-card p-4"
+          >
+            <div class="mb-4 border-b pb-3">
+              <h2 class="font-semibold">{{ t('problem_details') }}</h2>
+            </div>
+            <div
+              class="grid max-h-[min(50vh,32rem)] gap-3 overflow-y-auto overscroll-contain pr-1"
+              :class="problems.length > 1 ? 'md:grid-cols-2' : ''"
+            >
+              <div
+                v-for="(prob, idx) in problems"
+                :key="idx"
+                class="rounded-lg border border-destructive/20 bg-destructive/5 p-3"
+              >
+                <p class="text-sm font-medium">{{ prob.message }}</p>
+                <button
+                  v-if="prob.line"
+                  type="button"
+                  class="mt-1 inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-primary"
+                  @click="jumpToProblemLine(prob.line)"
+                >
+                  {{ t('line_number') }}: {{ prob.line }}
+                  <ArrowDown weight="duotone" class="h-3 w-3" />
+                </button>
+                <div v-if="prob.solutions?.length" class="mt-3 space-y-2">
+                  <p class="text-xs font-medium text-green-600">{{ t('solution') }}:</p>
+                  <div
+                    v-for="sol in prob.solutions"
+                    :key="sol.message"
+                    class="flex items-start gap-2 text-sm text-muted-foreground"
+                  >
+                    <Check
+                      weight="duotone"
+                      class="mt-0.5 h-4 w-4 flex-shrink-0 text-green-500"
+                    />
+                    <span>{{ sol.message }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -580,49 +637,6 @@ const onFileChange = async () => {
                 <ArrowUp weight="duotone" class="h-3.5 w-3.5" />
                 {{ t('scroll_top') }}
               </button>
-            </div>
-          </div>
-        </div>
-
-        <!-- 问题详情 -->
-        <div
-          v-if="problems.length > 0"
-          :ref="setProblemsSection"
-          class="scroll-mt-20 bg-card p-4"
-        >
-          <div class="flex items-center gap-2 mb-4 pb-3 border-b">
-            <AlertTriangle weight="duotone" class="h-5 w-5 text-destructive" />
-            <h2 class="font-semibold">{{ t('problem_details') }}</h2>
-          </div>
-          <div class="space-y-3">
-            <div
-              v-for="(prob, idx) in problems"
-              :key="idx"
-              class="p-3 rounded-lg border bg-destructive/5 border-destructive/20"
-            >
-              <div class="flex items-start gap-2">
-                <AlertTriangle
-                  weight="duotone"
-                  class="h-5 w-5 text-destructive flex-shrink-0 mt-0.5"
-                />
-                <div class="flex-1 min-w-0">
-                  <p class="font-medium text-sm">{{ prob.message }}</p>
-                  <p v-if="prob.line" class="text-xs text-muted-foreground mt-1">
-                    {{ t('line_number') }}: {{ prob.line }}
-                  </p>
-                  <div v-if="prob.solutions?.length" class="mt-3 space-y-2">
-                    <p class="text-xs font-medium text-green-600">{{ t('solution') }}:</p>
-                    <div
-                      v-for="sol in prob.solutions"
-                      :key="sol.message"
-                      class="flex items-start gap-2 text-sm text-muted-foreground"
-                    >
-                      <Check weight="duotone" class="h-4 w-4 text-green-500 flex-shrink-0 mt-0.5" />
-                      <span>{{ sol.message }}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
             </div>
           </div>
         </div>
