@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { integratedLaunchers } from '@/data/launchers'
 import AppButton from '@/components/ui/AppButton.vue'
+import PageHeader from '@/components/PageHeader.vue'
 import { setPageTitle } from '@/lib/pageTitle'
 import {
   PhRocketLaunch as Rocket,
@@ -29,26 +30,18 @@ const getPlatformIcon = (platforms: string[]) => {
 
 <template>
   <div class="container mx-auto px-4 py-8 max-w-4xl space-y-10">
-    <!-- 标头 Hero 区 -->
-    <header class="space-y-3">
-      <div
-        class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary border border-primary/20 text-xs font-semibold"
-      >
-        <Rocket weight="duotone" class="h-3.5 w-3.5" />
-        <span>开源生态共建</span>
-      </div>
-      <h1 class="text-3xl sm:text-4xl font-black tracking-tight text-foreground">已接入的启动器</h1>
-      <p class="text-sm sm:text-base text-muted-foreground leading-relaxed max-w-2xl">
-        作为 Minecraft 中文社区的标准日志分析与分享基础设施，LogShare
-        已被多家主流移动端、掌机及桌面启动器原生接入。玩家在遭遇崩溃时，无需繁琐复制，即可一键生成脱敏分享链接并获得专业报错诊断。
-      </p>
-    </header>
+    <PageHeader
+      eyebrow="开源生态共建"
+      :icon="Rocket"
+      title="已接入的启动器"
+      description="作为 Minecraft 中文社区的标准日志分析与分享基础设施，LogShare 已被多家主流移动端、掌机及桌面启动器原生接入。玩家在遭遇崩溃时，无需繁琐复制，即可一键生成脱敏分享链接并获得专业报错诊断。"
+    />
 
     <!-- 关键指标条 -->
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
       <div class="rounded-xl border border-border bg-card p-4 space-y-1">
         <span class="text-xs text-muted-foreground">已接入客户端</span>
-        <div class="text-2xl font-black text-foreground">5+ 款</div>
+        <div class="text-2xl font-black text-foreground">{{ integratedLaunchers.length }} 款</div>
       </div>
       <div class="rounded-xl border border-border bg-card p-4 space-y-1">
         <span class="text-xs text-muted-foreground">覆盖生态平台</span>

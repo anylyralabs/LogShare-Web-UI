@@ -7,6 +7,7 @@ import {
   type QqGroup
 } from '@/data/groups'
 import AppButton from '@/components/ui/AppButton.vue'
+import PageHeader from '@/components/PageHeader.vue'
 
 const sections: Array<{ title: string; groups: QqGroup[]; isChannel?: boolean }> = [
   { title: '各频道', groups: channelGroups, isChannel: true },
@@ -18,12 +19,10 @@ const sections: Array<{ title: string; groups: QqGroup[]; isChannel?: boolean }>
 
 <template>
   <div class="container mx-auto px-4 py-8 max-w-3xl">
-    <header class="mb-8">
-      <h1 class="text-3xl font-bold mb-2">群列表</h1>
-      <p class="text-muted-foreground">
-        遇到问题？加入对应的群获取帮助。加群前请先阅读教程中心的提问技巧。
-      </p>
-    </header>
+    <PageHeader
+      title="群列表"
+      description="遇到问题？加入对应的群获取帮助。加群前请先阅读教程中心的提问技巧。"
+    />
 
     <section v-for="section in sections" :key="section.title" class="mb-8">
       <h2 class="text-sm font-semibold text-muted-foreground mb-3">{{ section.title }}</h2>
@@ -31,7 +30,7 @@ const sections: Array<{ title: string; groups: QqGroup[]; isChannel?: boolean }>
         <div
           v-for="group in section.groups"
           :key="group.url"
-          class="flex items-center justify-between gap-3 rounded-lg border bg-card px-4 py-3"
+          class="flex items-center justify-between gap-3 rounded-lg border border-border/80 bg-card px-4 py-3 transition-colors hover:border-primary/30 hover:bg-muted/20"
         >
           <div class="min-w-0 flex-1">
             <div class="text-sm font-medium truncate">{{ group.name }}</div>

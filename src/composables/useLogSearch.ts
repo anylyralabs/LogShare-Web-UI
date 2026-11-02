@@ -1,8 +1,13 @@
 import { ref } from 'vue'
 import { parseLog } from '@/lib/logParser'
+import type { ParsedLogRow } from '@/lib/logParser.types'
 import { t } from '@/lib/i18n'
 
-export function useLogSearch(getOriginalText: () => string, setLogContent: (html: string) => void) {
+export function useLogSearch(
+  getOriginalText: () => string,
+  setLogResult: (rows: ParsedLogRow[], fallbackHtml?: string) => void,
+  scrollToLine: (lineNumber: number) => void
+) {
   const searchTerm = ref('')
   const searchIndex = ref(0)
   const searchResults = ref<number[]>([])
@@ -44,16 +49,20 @@ export function useLogSearch(getOriginalText: () => string, setLogContent: (html
       })
 
       if (matchingLines.length > 0) {
-        setLogContent(await parseLog(matchingLines.join('\n')))
+        setLogResult(await parseLog(matchingLines.join('\n')))
       } else {
-        setLogContent(`<div class="text-center p-8 text-muted-foreground">${t('no_results')}</div>`)
+        setLogResult(
+          [],
+          `<div class="text-center p-8 text-muted-foreground">${t('no_results')}</div>`
+        )
       }
 
       searchResults.value = results
       searchIndex.value = 0
     } catch (e) {
       console.error('Search failed:', e)
-      setLogContent(
+      setLogResult(
+        [],
         `<div class="text-center p-8 text-muted-foreground">${t('log_load_failed')}</div>`
       )
       searchResults.value = []
@@ -63,7 +72,7 @@ export function useLogSearch(getOriginalText: () => string, setLogContent: (html
 
   const resetView = async () => {
     try {
-      setLogContent(await parseLog(getOriginalText()))
+      setLogResult(await parseLog(getOriginalText()))
     } catch (e) {
       console.error('Failed to restore log view:', e)
     }
@@ -71,25 +80,22 @@ export function useLogSearch(getOriginalText: () => string, setLogContent: (html
     searchIndex.value = 0
   }
 
-  const scrollToSearchResult = (resultIndex: number) => {
-    const lineNum = resultIndex + 1
-    const el = document.getElementById(`L${lineNum}`)
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    }
+  // 搜索结果视图只渲染匹配行，行号按匹配顺序重新生成（1..n）
+  const scrollToSearchResult = (rowIndex: number) => {
+    scrollToLine(rowIndex + 1)
   }
 
   const goToNextResult = () => {
     if (searchResults.value.length === 0) return
     searchIndex.value = (searchIndex.value + 1) % searchResults.value.length
-    scrollToSearchResult(searchResults.value[searchIndex.value]!)
+    scrollToSearchResult(searchIndex.value)
   }
 
   const goToPrevResult = () => {
     if (searchResults.value.length === 0) return
     const len = searchResults.value.length
     searchIndex.value = (searchIndex.value - 1 + len) % searchResults.value.length
-    scrollToSearchResult(searchResults.value[searchIndex.value]!)
+    scrollToSearchResult(searchIndex.value)
   }
 
   const handleSearchInput = (event: KeyboardEvent) => {

@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { PhCaretRight as ChevronRight } from '@phosphor-icons/vue'
+import { PhArrowRight as ArrowRight } from '@phosphor-icons/vue'
 import { t } from '@/lib/i18n'
+import PageHeader from '@/components/PageHeader.vue'
 
 const tutorials = [
   {
@@ -36,13 +37,10 @@ const tutorials = [
 
 <template>
   <div class="container mx-auto px-4 py-8 max-w-4xl">
-    <!-- 页面头部 -->
-    <div class="mb-8">
-      <h1 class="text-3xl font-bold mb-2">{{ t('tutorials_center') }}</h1>
-      <p class="text-muted-foreground">
-        {{ t('tutorials_description') }}
-      </p>
-    </div>
+    <PageHeader
+      :title="t('tutorials_center')"
+      :description="t('tutorials_description')"
+    />
 
     <!-- 教程列表 -->
     <div class="space-y-3">
@@ -50,7 +48,7 @@ const tutorials = [
         v-for="tutorial in tutorials"
         :key="tutorial.id"
         :to="`/tutorials/${tutorial.id}`"
-        class="group block bg-card border border-border rounded-lg p-4 hover:border-primary/50 hover:shadow-md transition-all"
+        class="group block rounded-lg border border-border/80 bg-card p-4 transition-colors hover:border-primary/30 hover:bg-muted/20"
       >
         <div class="flex items-start justify-between gap-4">
           <div class="flex-1 min-w-0">
@@ -69,9 +67,9 @@ const tutorials = [
               </span>
             </div>
           </div>
-          <ChevronRight
+          <ArrowRight
             weight="duotone"
-            class="h-5 w-5 text-muted-foreground group-hover:text-primary group-hover:translate-x-1 transition-all flex-shrink-0"
+            class="h-5 w-5 flex-shrink-0 text-muted-foreground transition-all group-hover:translate-x-1 group-hover:text-primary"
           />
         </div>
       </RouterLink>

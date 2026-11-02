@@ -61,7 +61,7 @@ const widthClass: Record<string, string> = {
         >
           <div
             class="relative max-h-[85vh] w-full overflow-y-auto rounded-lg bg-card text-card-foreground shadow-2xl"
-            :class="widthClass"
+            :class="widthClass[width]"
           >
             <button
               v-if="showClose"

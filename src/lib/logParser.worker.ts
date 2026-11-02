@@ -1,5 +1,7 @@
 // ======================== 常量定义 ========================
 
+import type { ParsedLogRow } from './logParser.types'
+
 const COLOR_STYLE_MAP: Record<string, string> = {
   '0': 'format-black',
   '1': 'format-darkblue',
@@ -661,117 +663,69 @@ function groupLines(lines: string[]): Group[] {
 
 // ======================== 渲染函数 ========================
 
-function renderSimple(lines: string[]): string {
-  const n = lines.length
-  const parts: string[] = ['<div class="log-simple">']
-
-  for (let i = 0; i < n; i++) {
-    const line = lines[i]
-    if (!line || (i === n - 1 && line === '')) continue
-
-    const level = getLevel(line)
-    const isErrStyle = level === 'error' || level === 'fatal'
-    parts.push(
-      '<div class="log-line-simple ' + (isErrStyle ? 'entry-error' : 'entry-no-error') + '">',
-      '<span class="level level-' + level + '">',
-      formatContent(line),
-      '</span></div>'
-    )
-  }
-
-  parts.push('</div>')
-  return parts.join('')
-}
-
-function renderWithLineNumbers(lines: string[]): string {
+function renderRows(lines: string[]): ParsedLogRow[] {
   const groups = groupLines(lines)
-  const parts: string[] = ['<table class="log-table"><tbody>']
+  const rows: ParsedLogRow[] = []
 
-  for (let gi = 0; gi < groups.length; gi++) {
-    const group = groups[gi]!
-    const { lines: gLines, level: gLevel, start } = group
-    const isInformational = gLevel === 'info' || gLevel === 'debug'
+  for (const group of groups) {
+    const isInformational = group.level === 'info' || group.level === 'debug'
+    const groupClass =
+      group.level === 'error'
+        ? 'entry-error'
+        : group.level === 'warning'
+          ? 'entry-warning'
+          : 'entry-no-error'
+    const bgClass =
+      group.level === 'error' ? ' bg-error-group' : group.level === 'warning' ? ' bg-warning-group' : ''
 
-    if (isInformational) {
-      for (let li = 0; li < gLines.length; li++) {
-        const lineIndex = start + li
-        const lineNumber = lineIndex + 1
-        const line = gLines[li]!
-        const lineLevel = group.levels[li]!
-        const isErrStyle = lineLevel === 'error' || lineLevel === 'fatal'
-        const entryClass = isErrStyle ? 'entry-error' : 'entry-no-error'
+    for (let li = 0; li < group.lines.length; li++) {
+      const lineNumber = group.start + li + 1
+      const line = group.lines[li]!
+      const lineLevel = group.levels[li]!
+      const levelClass = isInformational ? lineLevel : group.level
+      const rowClass = isInformational
+        ? lineLevel === 'error' || lineLevel === 'fatal'
+          ? 'entry-error'
+          : 'entry-no-error'
+        : groupClass
 
-        parts.push(
-          '<tr class="log-row ' + entryClass + '" id="L' + lineNumber + '">',
-          '<td class="line-num">' + lineNumber + '</td>',
-          '<td class="line-content"><span class="level level-' + lineLevel + '">',
-          formatContent(line),
+      rows.push({
+        lineNumber,
+        html:
+          '<tr class="log-row ' +
+          rowClass +
+          bgClass +
+          '" id="L' +
+          lineNumber +
+          '">' +
+          '<td class="line-num">' +
+          lineNumber +
+          '</td>' +
+          '<td class="line-content"><span class="level level-' +
+          levelClass +
+          '">' +
+          formatContent(line) +
           '</span></td></tr>'
-        )
-      }
-    } else {
-      const rowClass = gLevel === 'error' ? 'entry-error' : 'entry-warning'
-      const bgClass = 'bg-' + gLevel + '-group'
-
-      let lineNumbersHtml: string | null = null
-
-      for (let li = 0; li < gLines.length; li++) {
-        const lineIndex = start + li
-        const lineNumber = lineIndex + 1
-        const line = gLines[li]!
-
-        if (li === 0) {
-          if (lineNumbersHtml === null) {
-            const nums: string[] = new Array(gLines.length)
-            for (let k = 0; k < gLines.length; k++) {
-              nums[k] = String(start + k + 1)
-            }
-            lineNumbersHtml = nums.join('<br>')
-          }
-          parts.push(
-            '<tr class="log-row ' + rowClass + ' ' + bgClass + '" id="L' + lineNumber + '">',
-            '<td class="line-num" rowspan="' + gLines.length + '">' + lineNumbersHtml + '</td>',
-            '<td class="line-content"><span class="level level-' + gLevel + '">',
-            formatContent(line),
-            '</span></td></tr>'
-          )
-        } else {
-          parts.push(
-            '<tr class="log-row ' + rowClass + ' ' + bgClass + '" id="L' + lineNumber + '">',
-            '<td class="line-content"><span class="level level-' + gLevel + '">',
-            formatContent(line),
-            '</span></td></tr>'
-          )
-        }
-      }
+      })
     }
   }
 
-  parts.push('</tbody></table>')
-  return parts.join('')
+  return rows
 }
 
-function parseLogWorker(raw: string, showLineNumbers: boolean = true): string {
-  const lines = raw.split('\n')
-
-  if (!showLineNumbers) {
-    return renderSimple(lines)
-  }
-
-  return renderWithLineNumbers(lines)
+function parseLogWorker(raw: string): ParsedLogRow[] {
+  return renderRows(raw.split('\n'))
 }
 
 // ======================== Worker 入口 ========================
 
-self.onmessage = (
-  e: MessageEvent<{ type: string; raw: string; showLineNumbers: boolean; id: number }>
-) => {
+self.onmessage = (e: MessageEvent<{ type: string; raw: string; id: number }>) => {
   if (e.data.type === 'parse') {
     try {
-      const html = parseLogWorker(e.data.raw, e.data.showLineNumbers)
+      const rows = parseLogWorker(e.data.raw)
       ;(self as unknown as { postMessage: (msg: unknown) => void }).postMessage({
         type: 'result',
-        html,
+        rows,
         id: e.data.id
       })
     } catch (err) {

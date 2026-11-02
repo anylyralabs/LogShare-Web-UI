@@ -17,6 +17,7 @@ import {
 } from '@/data/sponsors'
 import { t } from '@/lib/i18n'
 import { setPageTitle } from '@/lib/pageTitle'
+import PageHeader from '@/components/PageHeader.vue'
 
 setPageTitle('sponsor')
 
@@ -34,13 +35,7 @@ const sortedSponsors = computed(() => {
 
 <template>
   <div class="container mx-auto px-4 py-8 max-w-4xl">
-    <!-- 页面头部 -->
-    <div class="mb-8">
-      <h1 class="text-3xl font-bold mb-2">{{ t('sponsor_title') }}</h1>
-      <p class="text-muted-foreground">
-        {{ t('sponsor_description') }}
-      </p>
-    </div>
+    <PageHeader :title="t('sponsor_title')" :description="t('sponsor_description')" />
 
     <!-- 统计卡片 -->
     <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
@@ -84,7 +79,9 @@ const sortedSponsors = computed(() => {
           </div>
           <div>
             <p class="text-xs text-muted-foreground">{{ t('thanks_message') }}</p>
-            <p class="text-xl font-bold">❤️</p>
+            <p class="flex h-7 items-center">
+              <Heart weight="fill" class="h-5 w-5 text-red-500" />
+            </p>
           </div>
         </div>
       </div>
@@ -163,14 +160,10 @@ const sortedSponsors = computed(() => {
           :href="sponsorConfig.afdianLink"
           target="_blank"
           rel="noopener noreferrer"
-          class="afdian-rainbow-ring relative flex w-full rounded-lg p-[2px] text-white font-semibold transition-transform hover:scale-[1.02] overflow-hidden"
+          class="flex w-full items-center justify-center gap-2 rounded-lg border border-border bg-card py-3 font-semibold text-foreground transition-colors hover:border-primary/30 hover:bg-muted"
         >
-          <span
-            class="flex w-full items-center justify-center gap-3 rounded-[calc(var(--radius-xl)-2px)] bg-black py-3 transition-colors hover:bg-gray-900"
-          >
-            <Zap weight="duotone" class="h-5 w-5 text-white" />
-            <span>{{ t('sponsor_afdian') }}</span>
-          </span>
+          <Zap weight="duotone" class="h-5 w-5 text-primary" />
+          <span>{{ t('sponsor_afdian') }}</span>
         </a>
         <p class="text-sm text-center text-muted-foreground mt-3">
           {{ t('sponsor_afdian_note') }}
@@ -264,27 +257,3 @@ const sortedSponsors = computed(() => {
     </div>
   </div>
 </template>
-
-<style scoped>
-.afdian-rainbow-ring {
-  background: linear-gradient(90deg, #ec4899, #a855f7, #06b6d4, #22c55e, #f59e0b, #ec4899);
-  background-size: 300% 100%;
-  animation: afdian-rainbow-flow 4s linear infinite;
-}
-
-@keyframes afdian-rainbow-flow {
-  from {
-    background-position: 0% 50%;
-  }
-
-  to {
-    background-position: 300% 50%;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .afdian-rainbow-ring {
-    animation: none;
-  }
-}
-</style>

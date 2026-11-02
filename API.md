@@ -2,1242 +2,272 @@
 
 基础 URL：由配置 `urls.apiBaseUrl` 决定。
 
-同时提供 `/1/`（已弃用）和 `/v1/` 端点。建议新集成使用 `/v1/`。旧版 `/1/` 在过渡期内保持兼容。
+同时提供 `/1/`（已弃用）和 `/v1/` 端点。建议新集成使用 `/v1/`。
 
 完整 OpenAPI 3.1 规范见 [`openapi.yaml`](openapi.yaml)。
 
 ---
 
+## 核心模型
+
+一条日志记录不再区分“正文”和“附件”，而是由一个 ID 下的若干文件组成：
+
+- 新客户端上传时只提交 `files`；旧版 `content` 字段仍然兼容，会映射为 `latest.log`，已有客户端不需要迁移。
+- 单个文件大小不设上限；全部文件展开后合计不超过 20 MiB。
+- 上传阶段逐文件脱敏，并在识别为 Minecraft 日志时执行 SpinYarn 反混淆。
+- 全文 Codex 分析不在上传时执行，只在请求某个文件的分析接口时执行。
+- 多文件日志直接访问 `raw/{id}` 或 `insights/{id}` 会返回 `200` + 文件列表；客户端选择文件后再带文件名请求。
+
+---
+
 ## 快速接入
 
-接入「日志上传 + AI 分析」的最小流程：
-
 ```bash
-# 1. 上传日志（source 填启动器名/版本，用于匹配对应生态的知识库）
+# 1. 上传文件列表
 curl -X POST https://api.logshare.cn/v1/log \
-     -H 'Content-Type: application/json' \
-     -d '{"content":"<日志全文>","source":"your-launcher/1.0.0"}'
-# → {"success":true,"id":"sAbCdEf","token":"...","raw":"...","url":"..."}
+  -H 'Content-Type: application/json' \
+  -d '{
+    "files": [
+      {"name": "latest.log", "content": "<日志全文>"},
+      {"name": "crash-reports/crash-01.txt", "content": "<崩溃报告>"}
+    ],
+    "source": "your-launcher/1.0.0"
+  }'
 
-# 2. 获取原始日志或结构化解析（可选）
-curl https://api.logshare.cn/v1/raw/sAbCdEf          # 日志原文
-curl https://api.logshare.cn/v1/insights/sAbCdEf     # Codex 结构化分析
+# 2. 列出文件
+curl https://api.logshare.cn/v1/log/sAbCdEf
 
-# 3. AI 深度分析（SSE 流式，读超时建议 ≥300s）
-curl -N https://api.logshare.cn/v1/ai/sAbCdEf
+# 3. 多文件时先选择文件，再读取或分析
+curl https://api.logshare.cn/v1/raw/sAbCdEf/latest.log
+curl https://api.logshare.cn/v1/insights/sAbCdEf/latest.log
 ```
 
-接入时需要注意以下几点：
-
-- 上传响应中的 `token` 是删除日志的唯一凭证，丢失后无法找回，请自行持久化保存。
-- `source` 字段建议填写启动器名与版本（如 `fcl/1.2.0`）。知识库收录了 Pojav、FCL、ZL2、Amethyst、PGW、MobileGlues 等启动器生态的问题案例，该字段用于让 AI 分析优先匹配对应来源的案例。
-- AI 分析使用 SSE 流式协议，解析方式见「SSE 事件协议」一节，注意 `event:` 行与 `data:` 行的配对关系。
-- 全链路默认采用 Brotli（`br`）压缩：移动端与各客户端默认推荐开启 Brotli 压缩上传（`Content-Encoding: br`，亦向下兼容 gzip）；服务端出站响应全链路默认采用 Brotli（`br`）压缩返回。
-- 客户端 HTTP 读超时应设置为 300 秒以上，Agent 的多轮工具分析可能持续数十秒。
+上传响应的 `token` 是删除日志的唯一凭证，丢失后无法找回，请自行持久化保存。
 
 ---
 
 ## 客户端接入规范
 
-为确保 AI 诊断引擎与技术支持社区能够全面洞察异常根因，启动器或客户端接入时应遵循以下规范：
-
-1. **尽可能完整上传「游戏主日志 + 崩溃报告 + 启动器日志」**：
-   - 游戏闪退或报错往往源于 Java 虚拟机配置、移动端渲染器组件（如 Zink / Turnip / Holy GL4ES）、本地原生动态库或启动参数异常，单传游戏日志易产生诊断盲区。
-   - 接入时**尽可能同时上传三类关键内容**：
-     - **游戏主日志**（如 `latest.log`）；
-     - **崩溃报告**（如 `crash-reports/crash-*.txt`）；
-     - **启动器运行日志**（如 `launcher.log`、控制台输出或错误堆栈）。
-   - 建议通过 `files` 数组或 ZIP 压缩包一次性提交，服务端会自动保留相对路径并构建完整的多文件预览面板。
-2. **上传时务必注明来源标识（`source` 字段）**：
-   - 上传请求体中须尽量携带 `source` 参数，推荐格式为 `启动器标识/版本号`（例如 `pojav-glow-worm/3.4.0`、`fcl/1.2.0`、`zl2/2.1.0`、`amcl/1.0.0` 等）。
-   - LogShare 针对不同启动器生态组织了专有案例知识库，注明来源标识有助于 AI 分析精准匹配针对性解决方案。
-3. **保留删除凭证与分享直达**：
-   - 上传成功后持久化保存返回的 `token`，并在客户端界面提供分享链接（`url`）的一键复制或外跳功能。
+1. **一次上传完整现场**：建议同时提交游戏主日志、崩溃报告与启动器日志，通过 `files` 数组或 ZIP 压缩包提交。
+2. **多文件先让用户选择**：调用 `GET /v1/log/{id}`，若 `requiresFileSelection` 为 `true`，展示 `files` 列表让用户选择，再使用所选文件的 `name` 请求 raw/insights。
+3. **注明来源**：`source` 推荐格式为 `启动器标识/版本号`，例如 `fcl/1.2.0`、`pojavlauncher/3.4.1`。
+4. **保留删除凭证与分享链接**：持久化 `token`，并提供 `url` 的一键复制或外跳。
 
 ---
 
-## 日志管理
-
-### 上传日志
+## 上传日志
 
 ```
-POST /1/log   （已弃用，保留兼容）
+POST /1/log   （已弃用）
 POST /v1/log
 ```
 
-**Content-Type：** `application/x-www-form-urlencoded` 或 `application/json`。  
-**Content-Encoding：** 默认推荐 `br`（Brotli，极限压缩比），向下兼容 `gzip`、`x-gzip`、`deflate`（可叠加，最多 5 层，服务端设 20 MiB 解压安全上限）。
-**Accept-Encoding：** 默认采用 `br`（Brotli）全链路压缩返回（≥1024 字节），未声明时回退 `gzip`、`deflate`。
+**Content-Type：** `application/x-www-form-urlencoded` 或 `application/json`。
+**Content-Encoding：** 支持 `br`、`gzip`、`x-gzip`、`deflate`，最多 5 层；解压后请求体上限 32 MiB。
+**Accept-Encoding：** 默认采用 `br`，未声明时回退 `gzip`、`deflate`。
 
-**请求字段（JSON）：**
+**请求字段：**
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `content` | string | 是* | 日志内容（多文件上传时可为空，见下） |
-| `files` | array | 否 | 附加文件数组，每个元素 `{name, content}` |
-| `metadata[]` | array | 否 | 元数据，每项 `{key, value, label?, visible?}`；`value` 为字符串时直接存储，其他类型会 JSON 序列化；单项最长 value 1024 / label 128 / key 64 字符。服务端会在落库前用日志识别结果自动补写 `version`（label 为 `Minecraft 版本`）与 `loader`（label 为 `模组加载器`，取值 fabric / neoforge / forge / vanilla 等）两项元数据，客户端已提交同名键时以客户端值为准 |
-| `source` | string | 否 | 来源标识（最长 64 字符），建议填写，格式如 `fcl/1.2.0`、`pojavlauncher/3.4.1`。知识库按启动器生态组织了问题案例（FCL/ZL2/PGW/Amethyst/MobileGlues），该字段用于让 AI 分析优先匹配对应来源的案例 |
+| `files` | array | 否* | 文件数组，每个元素 `{name, content}`；文件数 ≤ 200，展开后合计 ≤ 20 MiB。与 `content` 至少提供一个 |
+| `content` | string | 否* | 旧版单文件字段；不为空时映射为 `latest.log`，与 `files` 同时存在时作为主文件 |
+| `metadata[]` | array | 否 | **分析核心输入**，每项 `{key, value, label?, visible?}`。最多 100 条；`key` 去除首尾空白后必须为 1–64 字符，`value` 字符串最长 1024 字符、其他类型会 JSON 序列化，`label` 最长 128 字符；重复 `key` 以首次出现为准；`visible=false` 不公开。JSON 与 urlencoded 均支持 |
+| `source` | string | 否 | 来源标识，最长 64 字符，格式如 `fcl/1.2.0` |
 
-\* 当提供 `files` 时 `content` 可省略，主文件取 `files[0]`。
+* `files` 与 `content` 至少提供一个；两者同时提供时，`content` 作为主文件 `latest.log`（若重名则使用 `main.log`），其余文件按 `files` 处理。旧客户端可以继续使用 `{"content": "...", "source": "..."}` 上传。
 
-**多文件上传：**
-
-每个 `files[].content` 可为纯文本，也可为 ZIP 压缩包（`name` 以 `.zip` 结尾时自动展开为多个文件，保留内部相对路径）：
+**多文件与 ZIP：**
 
 ```json
 {
-    "content": "主文件内容（可选）",
-    "files": [
-        { "name": "crash-reports/crash-01.txt", "content": "---- Minecraft Crash Report ----\n..." },
-        { "name": "server-logs.zip", "content": "<zip 二进制内容>" }
-    ]
+  "files": [
+    { "name": "latest.log", "content": "..." },
+    { "name": "crash-reports/crash-01.txt", "content": "..." },
+    { "name": "server-logs.zip", "content": "<zip 二进制内容>" }
+  ]
 }
 ```
 
-- 展开后每个文件独立经过脱敏过滤链
-- 上限：文件数 ≤ 200，解压后累计 ≤ 12MB（`storage.uploadFiles`）
-- ZIP 条目名会做路径遍历防护（拒绝 `../`、绝对路径）
-- **极速解耦与异步事件流**：上传时系统仅执行轻量级 Codex 特征探测并即刻持久化入库，毫秒级直接响应结果；随后派发 `log.uploaded` 事件，由后台常驻队列 Worker 异步执行内容敏感规则审核与 SpinYarn 堆栈反混淆。若异步审核命中违规规则，该日志将被物理清除并自动封禁非私网来源 IP。
+- `.zip` 文件会自动展开，保留内部相对路径。
+- 展开后每个文件独立经过脱敏过滤链。
+- 文件数上限 200；所有文件合计上限 20 MiB；不限制单个文件大小或行数。
+- ZIP 条目名会做路径遍历防护（拒绝 `../`、绝对路径）。
+- 同名文件会自动改名为 `name (2).ext`、`name (3).ext`。
+- 内容去重按「按名称排序的文件集合 + `source`」计算指纹；命中时直接返回既有 ID，`deduplicated: true`。
+
+> **metadata 很重要，不是可选装饰。** 请尽量提供 `version`、`loader`、`launcher`、`modpack`、崩溃上下文等结构化字段；`GET /v1/log/{id}` 会展示这些信息（`visible=false` 除外），后续分析、排查与统计都会依赖它。
 
 **响应：**
 
 ```json
 {
-    "success": true,
-    "message": "Log submitted successfully",
-    "id": "sAbCdEf",
-    "url": "https://logshare.cn/sAbCdEf",
-    "raw": "https://api.logshare.cn/1/raw/sAbCdEf",
-    "token": "f3a2b1c4d5e6..."
+  "success": true,
+  "message": "Log submitted successfully",
+  "id": "sAbCdEf",
+  "url": "https://logshare.cn/sAbCdEf",
+  "filesUrl": "https://api.logshare.cn/v1/log/sAbCdEf",
+  "raw": "https://api.logshare.cn/v1/raw/sAbCdEf",
+  "token": "3f9c1a7d...",
+  "deduplicated": false,
+  "fileCount": 2,
+  "requiresFileSelection": true,
+  "files": [
+    {
+      "name": "crash-reports/crash-01.txt",
+      "size": 2048,
+      "lines": 80,
+      "raw": "https://api.logshare.cn/v1/raw/sAbCdEf/crash-reports/crash-01.txt",
+      "insights": "https://api.logshare.cn/v1/insights/sAbCdEf/crash-reports/crash-01.txt"
+    }
+  ]
 }
 ```
 
-> `/v1/log` 返回格式相同，`raw` URL 指向 `/v1/raw/`。
-
-`token` 是删除该日志的唯一凭证，请自行保存。
+> **去重命中时的 token 语义**：命中已有指纹时返回的 `token` 是本次请求新生成的，并未写入存储，不能用于删除该日志；删除凭证仍属于首次上传者。
 
 ---
 
-### 删除日志
+## 删除日志
 
 ```
-DELETE /1/log/{id}   （已弃用，保留兼容）
+DELETE /1/log/{id}   （已弃用）
 DELETE /v1/log/{id}
 ```
 
-**鉴权：** `Authorization: Bearer <token>`（token 来自上传响应）。  
+**鉴权：** `Authorization: Bearer <token>`。
 **多 ID：** 逗号分隔，如 `DELETE /v1/log/id1,id2`。
-
-**响应：**
-
-```json
-{
-    "success": true,
-    "message": "Log deletion completed",
-    "deleted": ["sAbCdEf"],
-    "failed": [],
-    "total": 1,
-    "deletedCount": 1,
-    "failedCount": 0
-}
-```
-
-失败时 `failed` 数组包含每个失败的 ID、原因和 HTTP 状态码。
 
 ---
 
-## 日志获取
-
-### 获取原始日志
+## 文件列表
 
 ```
-GET /1/raw/{id}   （已弃用，保留兼容）
+GET /1/log/{id}   （已弃用）
+GET /v1/log/{id}
+```
+
+返回日志元信息与全部文件。多文件时 `requiresFileSelection` 为 `true`：
+
+```json
+{
+  "success": true,
+  "message": "Log metadata retrieved successfully",
+  "id": "sAbCdEf",
+  "fileCount": 2,
+  "requiresFileSelection": true,
+  "size": 4096,
+  "lines": 120,
+  "created": 1755200000,
+  "expires": 1755804800,
+  "metadata": [],
+  "source": "launcher/1.0.0",
+  "filesUrl": "https://api.logshare.cn/v1/log/sAbCdEf",
+  "files": [
+    {
+      "name": "latest.log",
+      "size": 2048,
+      "lines": 40,
+      "raw": "https://api.logshare.cn/v1/raw/sAbCdEf/latest.log",
+      "insights": "https://api.logshare.cn/v1/insights/sAbCdEf/latest.log"
+    }
+  ]
+}
+```
+
+---
+
+## 读取文件
+
+```
+GET /1/raw/{id}   （已弃用）
 GET /v1/raw/{id}
-```
 
-返回 `Content-Type: text/plain; charset=utf-8`，直接输出日志原文（多文件日志返回主文件）。
-
-### 获取附加文件
-
-```
-GET /1/raw/{id}/{filename}   （已弃用，保留兼容）
+GET /1/raw/{id}/{filename}   （已弃用）
 GET /v1/raw/{id}/{filename}
 ```
 
-`{filename}` 支持子路径，需 URL 编码：
+- 只有一个文件时，`GET /v1/raw/{id}` 直接返回 `text/plain` 内容。
+- 多个文件时，`GET /v1/raw/{id}` 返回 `200` + 文件列表（结构同文件列表接口），不会擅自选择文件。
+- 指定文件名后返回该文件原文，例如：
 
 ```
 GET /v1/raw/sAbCdEf/crash-reports/crash-01.txt
 ```
 
-返回该文件原文（`text/plain`）。文件不存在返回 404。路径会做遍历防护（拒绝 `../`、绝对路径）。
-
-### 获取日志元信息与文件列表
-
-```
-GET /1/log/{id}   （已弃用，保留兼容）
-GET /v1/log/{id}
-```
-
-返回日志元信息及附加文件列表（不含内容）：
-
-```json
-{
-    "success": true,
-    "message": "Log metadata retrieved successfully",
-    "id": "sAbCdEf",
-    "size": 4096,
-    "lines": 120,
-    "created": 1755200000,
-    "expires": 1755804800,
-    "metadata": [],
-    "source": "minecraft-server",
-    "files": [
-        { "name": "crash-reports/crash-01.txt", "size": 2048 }
-    ],
-    "raw": "https://api.logshare.cn/v1/raw/sAbCdEf"
-}
-```
+`{filename}` 支持子路径，需 URL 编码。文件不存在返回 404。文件名只做数据库精确匹配，不做文件系统路径拼接。
 
 ---
 
-### 获取分析结果
+## 分析文件
 
 ```
-GET /1/insights/{id}   （已弃用，保留兼容）
+GET /1/insights/{id}   （已弃用）
 GET /v1/insights/{id}
+
+GET /1/insights/{id}/{filename}   （已弃用）
+GET /v1/insights/{id}/{filename}
 ```
 
-返回 Codex 解析引擎的结构化分析结果，包含服务端类型、版本、错误信息、堆栈跟踪等：
+- 只有一个文件时，`GET /v1/insights/{id}` 直接返回 Codex 分析 JSON。
+- 多个文件时，返回 `200` + 文件列表；客户端选择文件后请求：
+
+```
+GET /v1/insights/sAbCdEf/latest.log
+```
+
+返回 Codex 解析结果，包含类型、版本、错误信息与堆栈等：
 
 ```json
 {
-    "id": "vanilla/server",
-    "name": "Vanilla",
-    "type": "Server Log",
-    "version": "1.21.9",
-    "title": "Vanilla 1.21.9 Server Log",
-    "analysis": {
-        "problems": [
-            { "message": "...", "counter": 1, "solutions": ["..."] }
-        ],
-        "information": [
-            { "message": "Minecraft version: 1.21.9", "counter": 1, "label": "Minecraft version", "value": "1.21.9" }
-        ]
-    }
+  "id": "vanilla/server",
+  "name": "Vanilla",
+  "type": "Server Log",
+  "version": "1.21.9",
+  "analysis": {
+    "problems": [
+      { "message": "...", "counter": 1, "solutions": ["..."] }
+    ],
+    "information": [
+      { "message": "Minecraft version: 1.21.9", "counter": 1, "label": "Minecraft version", "value": "1.21.9" }
+    ]
+  }
 }
 ```
 
-> `analysis.problems` 为诊断出的问题（含解决方案建议），`analysis.information` 为提取的信息（版本、类型等，含 `label`/`value`）。响应不包含 `entries`（原始日志行），内容紧凑。
+分析结果按文件内容哈希做进程内 LRU 缓存；同一文件重复访问不会重复执行 Codex。
 
 ---
 
-## 分析
-
-### 直接分析日志内容
+## 上传限制
 
 ```
-POST /1/analyse   （已弃用，保留兼容）
-POST /v1/analyse
+GET /1/limits   （已弃用）
+GET /v1/limits
 ```
 
-与 `GET /insights/{id}` 类似，但直接从请求体取内容而非读取已存储日志。请求格式同 `POST /log`。返回 Codex 结构化分析结果（结构同上「获取分析结果」）。
+```json
+{
+  "storageTime": 604800,
+  "maxFiles": 200,
+  "maxTotalBytes": 20971520,
+  "maxRequestBodyBytes": 33554432
+}
+```
+
+> **限流口径：** 限流在边缘完成：nginx `limit_req` 按 IP 30 r/s（burst 60），OpenLiteWaf 再叠加 10 秒窗口 240 次的 CC 限流。CC 超限返回 `429` 并带 `Retry-After`，`limit_req` 超限返回 `503`；两者都不封禁 IP（特征命中累计 3 次才会临时封禁）。应用层不再执行内容审核，边缘 WAF 仍负责基础探测拦截。
 
 ---
 
-## AI 分析
-
-> **推荐的使用方式：** 先调用 `GET /v1/insights/{id}` 展示结构化错误摘要（该接口不消耗 AI 资源），再在用户主动触发时调用 `GET /v1/ai/{id}` 进行流式分析。这样可以避免为每次页面展示都执行一次 AI 分析。
-
-> **禁用开关**：配置 `ai.enabled = false`（或环境变量 `AI_ENABLED=false`）时，所有 `/v1/ai/*` 接口统一返回 HTTP 404（`{"success":false,"error":"AI analysis is disabled.","code":404}`）。默认 `true` 启用。
-
-当配置 `ai.agent.enabled` 为 `true` 时，AI 接口走 LogAgent（模型驱动工具循环）；否则保持旧版直连分析。当配置 `ai.queue.enabled` 为 `true` 时，分析经 Redis Streams 微队列执行（并发与排队深度可配置），SSE 事件协议不变；详见「SSE 事件协议」下的队列模式说明。
-
-### 基于已存储日志
-
-```
-GET /1/ai/{id}   （已弃用，保留兼容）
-GET /v1/ai/{id}
-```
-
-SSE（Server-Sent Events）流式输出。LogAgent 模式下，Agent 可读取该日志 ID 下的所有文件（`list_log_files` / `read_log_file` / `grep_log_file` 工具，作用域限定在当前 ID）。`GET /v1/ai/{id}` 会绑定该 ID；`POST /v1/ai/analyse` 只有请求 JSON 提供 `id` 时才会开放文件工具。
-
-> **缓存行为：** `GET /v1/ai/{id}` 的分析结论按日志 ID 缓存 30 分钟——同一 ID 重复请求会直接返回上次结论（不再执行工具调用）；调试时如需强制重新分析，重新上传一份新日志即可。
-
-### 直接提交内容
-
-```
-POST /1/ai/analyse   （已弃用，保留兼容）
-POST /v1/ai/analyse
-```
-
-不落盘，直接提交内容给 AI 分析。请求格式同 `POST /log`。SSE 流式输出，缓存基于内容哈希（30 分钟 TTL）。
-
-> **脱敏差异：** 已存储日志的分析路径（`/v1/ai/{id}`）读取的是上传时经过 `filter.pre` 脱敏过滤链处理后的内容；而本端点直传的内容**不经过**脱敏链，原文会直接发送给 AI 网关。用户提交含敏感信息（token、IP 等）的日志时，请自行确认可接受该差异，或先走 `POST /v1/log` 再分析。
-
-**可选字段 `id`：** 传入已存在的日志 ID 时，Agent 获得该日志文件的访问权（会话作用域），可用于多文件对比；`content` 可省略（缺省读取该 ID 主文件）。缓存键基于该 ID。
-
-```json
-{
-    "content": "可选，附加分析内容",
-    "id": "sAbCdEf"
-}
-```
-
-### SSE 事件协议
-
-LogAgent 模式（`ai.agent.enabled`）会输出额外的 `event: status` 事件，旧的 `data:`（正文增量）与 `event: done` 保持不变，兼容只读旧协议的客户端。
-
-| 事件 | 载荷 `data` | 说明 |
-|------|-------------|------|
-| `event: status` | `{"type":"queued","position":N}` | 仅队列模式（`ai.queue.enabled`）：任务已入队，`position` 为入队时的近似队列深度 |
-| `event: status` | `{"type":"thinking","delta":"..."}` | 模型思维链（reasoning_content）逐段推送，供前端展示 |
-| `event: status` | `{"type":"tool","name":"web_search_exa","arguments":{...}}` | 即将调用某工具 |
-| `event: status` | `{"type":"tool_result","name":"web_search_exa","summary":"...","truncated":true}` | 工具返回摘要（完整结果进 LLM 上下文） |
-| `event: status` | `{"type":"limit","rounds":3}` | 达到工具循环上限（默认 50 轮） |
-| `data:`（原有） | `{"choices":[{"delta":{"content":"..."}}]}` | 正文增量（OpenAI 兼容格式） |
-| `event: error` | `{"error":"..."}` | 流异常终止（排队超时、队列故障或上游异常） |
-| `event: done` | `{"status":"completed"}` | 流正常结束 |
-
-**队列模式（`ai.queue.enabled`）：** 全部 AI 分析经 Redis Streams 微队列执行，端点本身只做 SSE 中继，事件协议不变（仅多首帧 `queued`）。三个行为差异：① 队列已满（深度达 `ai.queue.maxQueue`）时，在 SSE 开始前返回 `429` JSON（带 `Retry-After: 30`）；② 客户端断开不取消任务，分析继续跑完并写入结果缓存，后续请求（含缓存命中路径）直接取用；③ Redis 不可用时按 `ai.queue.failOpen` 回退请求内直连执行（默认回退），行为与队列关闭时一致。中继端最长等待 `ai.queue.waitTimeout` 秒，超时以 `event: error` 收尾。
-
-**前端 SSE 解析注意事项：** 一个 SSE 事件以空行（`\n\n`）结束；`event: status` 后紧跟其 `data:` JSON，未声明 `event:` 的 `data:` 行是正文增量。正文应拼接 `data.choices[0].delta.content`，思考内容拼接 `data.delta`。除 `done` 外还需处理 `event: error`（`data.error`）和 `event: status` 的 `tool`、`tool_result`、`limit`。
-**可注册的工具：** 工具会作为 OpenAI-compatible `tools` 字段发送给模型；只有满足注册条件时才会出现在该次会话中。工具调用过程本身不会作为客户端请求发送，前端只接收对应的 SSE 状态事件。
-
-| 工具 | 注册条件 | 参数 | 返回给模型的内容 |
-|------|----------|------|------------------|
-| `web_search_exa` | `ai.mcp.webSearch.url` 非空 | `query: string`（必填，错误类名、报错关键词或 mod 名称） | Exa MCP 文本搜索结果，多个文本块以空行拼接 |
-| `rag_search` | `ai.mcp.rag.url` 非空 | `query: string`（必填）；`topic: string`（可选，限定主题目录内检索）；`k: number`（可选，默认 5，服务端限制 1–20） | SQLite FTS5/BM25 知识库结果，包含标题、来源、片段和分数 |
-| `list_topics` | `ai.mcp.rag.url` 非空 | 无参数，`properties: {}` | 知识库主题地图：目录、描述、文档数量和示例文件名 |
-| `list_log_files` | 当前会话绑定日志 ID | 无参数，`properties: {}` | 主文件 `main` 及附加文件的名称、字节数、行数（crash-reports 类文件置顶并标注 `[优先]`） |
-| `read_log_file` | 当前会话绑定日志 ID | `filename: string`（必填） | 返回该文件的**完整内容**（无行区间参数）；单次字节上限由 `ai.agent.maxFileBytes` 控制（默认 512 KiB），超出时截断并附提示；同一会话内重复读取同一文件会被拒绝并返回提示 |
-| `grep_log_file` | 当前会话绑定日志 ID | `query: string`（必填，关键词或短语）；`filename: string`（可选，默认 `main`）；`case_sensitive: boolean`（可选，默认 false）；`context_lines: integer`（可选，默认 1，范围 0–5）；`max_matches: integer`（可选，默认 10，范围 1–30） | 逐行检索匹配行，返回带有行号对齐、匹配标记（`>`）与前后上下文的文本块；连续行区间自动合并；超出上限提示截断 |
-
-### 工具定义示例
-
-```json
-[
-  {"type":"function","function":{"name":"web_search_exa","description":"搜索互联网，查找知识库未覆盖的公开问题：新版本 mod/服务端兼容性、小众报错、官方公告等。知识库检索无果后再使用；查询词与 rag_search 相同，使用错误类名或报错关键词原文。","parameters":{"type":"object","properties":{"query":{"type":"string","description":"搜索关键词，使用错误类名或报错关键词原文"}},"required":["query"]}}},
-  {"type":"function","function":{"name":"rag_search","description":"在内置知识库中检索已验证的实战资料。知识库覆盖：常见崩溃与故障模式（mixin 注入失败、内存不足、Java 版本错误等）、移动端启动器生态实战案例蒸馏（FCL/Zalith/Amethyst/PGW/MobileGlues，含排障决策树）、三大日志文件格式解读、Fabric/Forge/NeoForge 与 PaperMC/Purpur/Geyser 等开发文档。日志中出现异常类名、崩溃特征或启动器相关问题时优先使用；纯常识问题不必使用。返回带来源路径的文档片段，多数条目按「签名-含义-解决方案」组织。","parameters":{"type":"object","properties":{"query":{"type":"string","description":"检索词。直接使用日志中的原文信号：英文异常类名或错误串（如 MixinApplyError、SIGSEGV、OutOfMemoryError），或中文症状关键词（如 内存不足、启动闪退）。不要翻译或改写异常类名。"},"topic":{"type":"string","description":"可选。限定在某个主题目录内检索（目录名来自 list_topics 的主题地图），如 \"patterns\"、\"日志分析\"。省略则全库检索。"},"k":{"type":"number","description":"返回片段数量，默认 5"}},"required":["query"]}}},
-  {"type":"function","function":{"name":"list_topics","description":"列出内置知识库的主题地图（目录、说明与内容样本）。不确定检索方向、或 rag_search 连续无结果时调用；看完地图后应带着明确目标词去 rag_search（可配合 topic 参数定向），不要看完地图就停止分析。","parameters":{"type":"object","properties":{}}}},
-  {"type":"function","function":{"name":"list_log_files","description":"列出当前日志 ID 下的所有文件（含主文件与附加文件）。","parameters":{"type":"object","properties":{}}}},
-  {"type":"function","function":{"name":"read_log_file","description":"读取当前日志下指定文件的内容。默认返回完整文件；需要控制范围时可使用 line_start/line_end 指定行区间，或使用 offset/max_bytes 指定字节区间。主文件名为 main。","parameters":{"type":"object","properties":{"filename":{"type":"string","description":"文件名（主文件为 main，或使用 list_log_files 列出的名称）"},"line_start":{"type":"integer","description":"起始行号，从 1 开始；省略则从第 1 行开始"},"line_end":{"type":"integer","description":"结束行号，包含该行；省略则读取到文件末尾"},"offset":{"type":"integer","description":"字节起始位置；使用行区间时不要设置"},"max_bytes":{"type":"integer","description":"字节读取模式下的最大字节数；使用行区间时不要设置"}},"required":["filename"]}}},
-  {"type":"function","function":{"name":"grep_log_file","description":"在当前日志的指定文件中按关键词逐行检索（类似 grep），返回匹配行号、行内容与前后上下文。适合定位特定异常、报错关键字、mod ID 或崩溃特征，避免通读超大文件；获取行号后可按需配合 read_log_file 精确读取。","parameters":{"type":"object","properties":{"query":{"type":"string","description":"检索关键词或文本短语（如异常类名、模组名、错误关键字）"},"filename":{"type":"string","description":"文件名（主文件为 main，或使用 list_log_files 列出的名称；省略则默认 main）"},"case_sensitive":{"type":"boolean","description":"是否区分大小写，默认 false（忽略大小写）"},"context_lines":{"type":"integer","description":"命中行前后各显示的上下文行数（0-5，默认 1）"},"max_matches":{"type":"integer","description":"最大返回匹配项数（1-30，默认 10）"}},"required":["query"]}}}
-]
-```
-
-工具执行失败不会终止整个 Agent 循环：错误文本会作为 `role: tool` 消息返回模型，由模型决定重试、换工具或直接给出结论。
-
-**重复读取防护：** 同一分析会话内，模型对同一文件的第二次 `read_log_file` 调用不会返回文件内容，而是收到提示「文件 X 已读取（共 N 行，M 字节），其内容已在上文中提供，请直接基于已有内容进行分析，不要重复调用本工具」。`filename` 缺省与 `main` 视为同一文件。该机制在服务端强制执行，用于消除模型反复查看同一日志的循环行为。
-
-**工具结果截断规则：**
-
-- `read_log_file` 的全文结果**不受**通用 12KB 工具截断限制，完整进入模型上下文（仅受 `ai.agent.maxFileBytes` 字节上限约束，超限时有明确截断提示）。
-- 检索类工具（`rag_search`、`web_search_exa`、`grep_log_file`）单次结果放宽至 32KB，超限时附带可见标记 `[...工具结果过长，已截断至 N 字节...]`。
-- 初始分析日志上下文：总长度 < 12KB 时完整直传；≥ 12KB 时统一触发错误定位正则，定位到错误行时截取 12KB 聚焦窗口（预留 2.5KB 前置因果与完整后置堆栈，整行对齐）；未定位到错误时不塞入前缀日志正文，改为提供日志概况与常用 grep 关键词，引导模型遵循“适可而止”思维链开展定向排查。
-
-**工具调用兼容细节：**
-
-- 服务端会过滤没有 `name` 的空工具调用，避免将无效 tool call 转发给模型网关。
-- 无参数工具（`list_topics`、`list_log_files`）发送给上游时，`function.arguments` 统一为 JSON 字符串 `{}`，不是空字符串。
-- `tool_call_id` 会原样用于后续 `role: tool` 消息；前端无需自行生成或修改该字段。
-- 同一 Agent 请求内，相同 MCP endpoint 会复用已初始化的 MCP 会话；不同请求不会共享会话。
-- `maxToolRounds` 是完整 Agent 轮次上限；达到上限时发送 `event: status`，其 `data` 为 `{"type":"limit","rounds":N}`，随后仍发送 `event: done`。
-- `reasoning_content` 只有上游模型实际返回时才会产生 `thinking` 事件；模型不返回推理增量时不会人为生成思考内容。
-
-
-> RAG 为内置服务（`rag/` 目录），SQLite FTS5 纯本地检索。构建索引 `php bin/hyperf.php rag:build`；RAG MCP server 整合进 Hyperf 主进程的 `/rag` 路径，默认 `ai.mcp.rag.url = http://127.0.0.1:9501/rag`，数据库路径由 `ai.mcp.rag.db` 指定。索引先在临时数据库中完整构建，再原子替换正式索引，构建失败会保留旧索引。MCP 请求体不设应用层大小限制，这是有意设计；`rag_search.query` 仍受服务端限制。
-
----
-
-## RAG MCP 服务（内置知识库检索）
-
-内置于 Hyperf 主进程的 **Streamable HTTP MCP 服务**（JSON-RPC 2.0），提供本地知识库检索。知识库覆盖：Forge/NeoForge/Fabric 官方开发者文档，PaperMC 全家桶（Paper/Velocity/Waterfall/Folia）、Purpur/Glowstone/Geyser/Quilt 服务端文档，以及 Android 启动器生态的问题案例与错误签名文档。
-
-检索管线：词法召回（FTS5 BM25 + LIKE，AND→OR 逐级降级，CJK 自动二元切分）∪ 可选 bge-m3 向量召回；向量结果按余弦相似度优先，词法结果去重后补充。数据库路径由 `ai.mcp.rag.db` 指定（默认 `rag/index.db`），构建索引：`php bin/hyperf.php rag:build`。
-
-### 端点
-
-```
-POST /rag   （同时接受 GET）
-```
-
-访问控制：默认仅允许 Hyperf 本机回环请求。通过反向代理或外部客户端访问时，在 `Config.inc.php` 设置 `ai.mcp.rag.authToken`，并发送 `Authorization: Bearer <authToken>`；未设置 token 时不要将 `/rag` 暴露到公网。请求体不设应用层大小限制，这是 MCP transport 的有意设计；`rag_search.query` 由服务端单独限制长度。
-
-### JSON-RPC 方法
-
-| 方法 | 说明 |
-|------|------|
-| `initialize` | MCP 握手，返回协议版本与服务信息 |
-| `tools/list` | 列出可用工具（`rag_search` / `list_topics`） |
-| `tools/call` | 调用工具 |
-| `ping` | 健康探测（返回 `{}`） |
-
-### initialize
-
-请求：
-
-```json
-{ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {} }
-```
-
-响应：
-
-```json
-{
-    "jsonrpc": "2.0",
-    "id": 1,
-    "result": {
-        "protocolVersion": "2025-03-26",
-        "capabilities": { "tools": { "listChanged": false } },
-        "serverInfo": { "name": "logshare-rag", "version": "1.7.1" }
-    }
-}
-```
-
-### tools/list
-
-请求：
-
-```json
-{ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }
-```
-
-响应：
-
-```json
-{
-    "jsonrpc": "2.0",
-    "id": 2,
-    "result": {
-        "tools": [
-            {
-                "name": "rag_search",
-                "description": "在内部知识库中检索相关文档片段。用于查找已知错误与解决方案。",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "query": { "type": "string", "description": "检索关键词，使用错误类名或报错关键词" },
-                        "k": { "type": "number", "description": "返回片段数量，默认 5" }
-                    },
-                    "required": ["query"]
-                }
-            },
-            {
-                "name": "list_topics",
-                "description": "列出知识库涵盖的主题与文档分布，帮助你决定检索方向。搜索前可先调用本工具了解知识库有什么。",
-                "inputSchema": { "type": "object", "properties": {} }
-            }
-        ]
-    }
-}
-```
-
-### tools/call —— rag_search
-
-请求：
-
-```json
-{
-    "jsonrpc": "2.0",
-    "id": 3,
-    "method": "tools/call",
-    "params": { "name": "rag_search", "arguments": { "query": "OutOfMemoryError", "k": 5 } }
-}
-```
-
-响应（检索结果以纯文本汇总在 `content[0].text`）：
-
-```json
-{
-    "jsonrpc": "2.0",
-    "id": 3,
-    "result": {
-        "content": [
-            { "type": "text", "text": "在知识库中找到 2 条相关文档：\n\n[1] 内存溢出（来源: ...）\n    ...\n" }
-        ]
-    }
-}
-```
-
-### tools/call —— list_topics
-
-请求：
-
-```json
-{
-    "jsonrpc": "2.0",
-    "id": 4,
-    "method": "tools/call",
-    "params": { "name": "list_topics", "arguments": {} }
-}
-```
-
-响应：
-
-```json
-{
-    "jsonrpc": "2.0",
-    "id": 4,
-    "result": {
-        "content": [
-            { "type": "text", "text": "知识库共 N 个主题目录、M 个分块：\n\n■ ...\n" }
-        ]
-    }
-}
-```
-
-### 错误码
-
-| 错误码 | 含义 |
-|--------|------|
-| `-32700` | 请求不是合法 JSON-RPC |
-| `-32601` | 方法不存在 |
-| `-32602` | 工具不存在 / 参数错误 |
-| `-32603` | 内部错误（含数据库不可用） |
-
----
-
-## 信息查询
-
-### 根端点
+## 根端点
 
 ```
 GET /
 ```
 
-返回全部可用端点的列表：
-
-```json
-{
-    "success": true,
-    "message": "LogShare API",
-    "endpoints": ["POST /v1/log", "GET /v1/raw/{id}", "..."]
-}
-```
-
-### 速率限制
-
-```
-GET /1/limits   （已弃用，保留兼容）
-GET /v1/limits
-```
-
-**响应：**
-
-```json
-{
-    "maxLength": 10485760,
-    "maxLines": 50000,
-    "storageTime": 604800
-}
-```
-
-> **限流口径：** 全局限流按 `IP + method + 归一化路径` 计数（动态资源段如 `/v1/raw/{id}` 共享同一桶），默认每 IP 每方法每路径 36,000 次/60 秒，触发返回 HTTP 429。正常集成远达不到该阈值；若你的应用有高并发拉取需求请联系部署方调整。
-
-### 过滤器列表
-
-```
-GET /1/filters   （已弃用，保留兼容）
-GET /v1/filters
-```
-
-过滤器清单由 `filter.pre` 配置动态生成，始终与实际上链路一致；以下为默认配置的完整输出。
-
-**响应：**
-
-```json
-{
-    "success": true,
-    "filters": [
-        { "type": "trim", "data": null },
-        { "type": "limit-bytes", "data": { "limit": 10485760 } },
-        { "type": "limit-lines", "data": { "limit": 50000 } },
-        {
-            "type": "regex",
-            "data": {
-                "patterns": [
-                    { "pattern": "IPv4", "replacement": "**.**.**.**" },
-                    { "pattern": "IPv6", "replacement": "****:****:****:****:****:****:****:****" },
-                    { "pattern": "IPv6Short", "replacement": "****:****:****:****:****:****:****:****" },
-                    { "pattern": "Uuid", "replacement": "********-****-****-****-************" },
-                    { "pattern": "Xuid", "replacement": "xuid:\"****************\"" },
-                    { "pattern": "SessionToken", "replacement": "accessToken:\"********\"" },
-                    { "pattern": "ClientId", "replacement": "clientId:\"********\"" },
-                    { "pattern": "Coordinate", "replacement": "BlockPos(*****, *****, *****)" },
-                    { "pattern": "Username", "replacement": "C:\\Users\\********\\" },
-                    { "pattern": "AccessToken", "replacement": "accessToken:\"********\"" }
-                ]
-            }
-        }
-    ]
-}
-```
-
-### 速率错误测试
-
-```
-GET /1/errors/rate   （已弃用，保留兼容）
-GET /v1/errors/rate
-```
-
-始终返回 HTTP 429，用于测试限速错误处理。
+返回全部可用端点列表。
 
 ---
-
-## 管理后台接口（Admin API）
-
-所有管理后台端点均位于 `/{version}/admin/*`（推荐 `/v1/admin/*`），受 `admin.enabled` 开关保护（未启用时返回 404）。  
-请求必须在 Header 中携带管理员鉴权令牌：
-- `Authorization: Bearer <ADMIN_TOKEN>`
-- 或 `X-Admin-Token: <ADMIN_TOKEN>`
-
-若令牌缺失或不匹配，返回 401 Unauthorized。
-
-### 1. 日志列表查询
-
-```
-GET /v1/admin/logs
-```
-
-**Query 参数：**
-
-| 参数 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `page` | int | 1 | 当前页码（从 1 开始） |
-| `limit` | int | 20 | 每页条数（1–100） |
-| `source` | string | - | 按上传来源标识精准过滤（如 `fcl/1.2.0`） |
-| `since` | int | - | 按创建时间过滤（≥ since 秒级时间戳） |
-| `until` | int | - | 按创建时间过滤（≤ until 秒级时间戳） |
-| `keyword` | string | - | 模糊检索（支持日志完整 ID、原始 ID 或 source） |
-
-**响应示例：**
-
-```json
-{
-    "success": true,
-    "message": "Logs retrieved successfully",
-    "items": [
-        {
-            "id": "sAbCdEf",
-            "size": 40960,
-            "source": "fcl/1.2.0",
-            "created": 1726200000,
-            "filesCount": 2
-        }
-    ],
-    "total": 128,
-    "page": 1,
-    "limit": 20,
-    "totalPages": 7
-}
-```
-
-### 2. 日志详情查看
-
-```
-GET /v1/admin/logs/{id}
-```
-
-免用户删除 Token 查看单条日志的完整数据与元数据。
-
-**响应示例：**
-
-```json
-{
-    "success": true,
-    "message": "Log details retrieved successfully",
-    "id": "sAbCdEf",
-    "size": 40960,
-    "lines": 1200,
-    "created": 1726200000,
-    "expires": 1726804800,
-    "source": "fcl/1.2.0",
-    "files": [
-        {"name": "crash-reports/crash.txt", "size": 1024}
-    ],
-    "metadata": [],
-    "content": "[12:34:56] [Server thread/INFO]: ..."
-}
-```
-
-### 3. 日志特权强制删除
-
-```
-DELETE /v1/admin/logs/{id}
-```
-
-管理员下架接口，**无需**普通用户的 deletion token。支持通过逗号分隔批量删除（如 `DELETE /v1/admin/logs/s123,s456`）。删除后主存储数据、附加文件及 Redis 缓存同步清除并写入墓碑标记。
-
-**响应示例：**
-
-```json
-{
-    "success": true,
-    "message": "Log deletion completed",
-    "deleted": ["sAbCdEf"],
-    "failed": [],
-    "total": 1,
-    "deletedCount": 1,
-    "failedCount": 0
-}
-```
-
-### 4. AI 分析队列监控
-
-```
-GET /v1/admin/system/queue
-```
-
-查看当前 AI 微队列运行状态与排队指标。
-
-**响应示例：**
-
-```json
-{
-    "success": true,
-    "message": "Queue status retrieved successfully",
-    "enabled": true,
-    "depth": 0,
-    "maxQueue": 50,
-    "maxConcurrent": 2,
-    "waitTimeout": 300,
-    "claimIdleMs": 120000,
-    "jobTtl": 600,
-    "failOpen": true
-}
-```
-
-### 5. 系统统计与状态
-
-```
-GET /v1/admin/system/stats
-```
-
-查看系统版本、PHP/Swoole 运行时、存储后端、总日志数及 RAG 索引时间戳。
-
-**响应示例：**
-
-```json
-{
-    "success": true,
-    "message": "System statistics retrieved successfully",
-    "version": "1.7.8",
-    "phpVersion": "8.4.4",
-    "swooleVersion": "6.2.0",
-    "storageBackend": "s",
-    "totalLogs": 2480,
-    "storageTime": 604800,
-    "aiEnabled": true,
-    "ragIndexUpdated": 1726200000
-}
-```
-
-### 6. 获取系统配置（已脱敏）
-
-```
-GET /v1/admin/config
-```
-
-获取全站当前的完整配置树。为防止敏感凭据泄露，`admin.token`、`storage.mariadb.password`、`cache.redis.password`、`ai.mcp.rag.authToken` 统一返回 `******`；`ai.apiKeys` 与 `ai.rag.providers[].apiKey` 统一返回首尾截断掩码（如 `sk-12****abcd`）。
-
-### 7. 更新系统配置（动态热生效）
-
-```
-PUT /v1/admin/config
-```
-
-更新业务配置并持久化至 `runtime/dynamic_config.json`。修改后立即更新内存单例，无需重启服务即可对新请求热生效。若传入已脱敏的密钥占位符，服务端会自动保留并还原原有的真实密钥，不覆盖。
-
-### 8. 重置系统配置
-
-```
-POST /v1/admin/config/reset
-```
-
-清空动态配置文件，重新载入基础配置与环境变量。
-
-### 9. AI 模型连通性测试
-
-```
-POST /v1/admin/config/test-ai
-```
-
-向指定或当前配置的 AI API 发送测试请求，探测模型响应与时延。
-
-**请求参数（JSON）：**
-- `baseUrl` (string, 可选): AI 端点地址，缺省使用当前配置
-- `model` (string, 可选): 模型名，缺省使用当前配置
-- `apiKey` (string, 可选): 密钥，若包含掩码或未传则使用当前有效密钥
-- `timeout` (int, 可选): 超时秒数，默认 15s
-- `headers` (object, 可选): 自定义 HTTP 请求头键值对（如 `{"HTTP-Referer": "https://logshare.cn", "X-Title": "LogShare"}`）
-
-### 10. RAG 向量供应商连通性测试
-
-```
-POST /v1/admin/config/test-rag-provider
-```
-
-向指定或当前配置的向量 Embedding 供应商发送测试向量化请求，探测网络与模型维度。
-
-**请求参数（JSON）：**
-- `baseUrl` (string, 必填): Embedding API 地址
-- `embeddingModel` (string, 必填): 向量模型 ID（如 `BAAI/bge-m3`）
-- `apiKey` (string, 可选): 密钥，支持掩码还原
-- `name` (string, 可选): 供应商代号
-
-### 11. 知识库指标与生态主题全景
-
-```
-GET /v1/admin/rag/stats
-```
-
-返回向量索引文件大小、最后更新时间、文档分块总数（Chunks）、已向量化数量（Embedded）、语义增强状态及生态主题分类（Forge/NeoForge/PaperMC/渲染器/崩溃库等）。
-
-### 12. 触发知识库重新构建
-
-```
-POST /v1/admin/rag/build
-```
-
-异步启动知识库构建任务。采用原子临时文件生成机制，构建过程中不阻塞线上正常检索。
-
-### 13. 获取知识库构建状态
-
-```
-GET /v1/admin/rag/build/status
-```
-
-轮询知识库构建进度与状态（`idle` / `building` / `success` / `failed`）及耗时统计。
-
-### 14. 知识库检索调试
-
-```
-POST /v1/admin/rag/search
-```
-
-在线测试知识库召回效果。
-
-**请求参数（JSON）：**
-- `query` (string, 必填): 检索关键词或报错文本
-- `limit` (int, 可选): 返回条数（1~20，默认 5）
-
-### 15. 知识库分类主题列表
-
-```
-GET /v1/admin/rag/topics
-```
-
-获取知识库所有合法注册分类目录、人工定性描述及文档总数统计。
-
-### 16. 知识库文档列表
-
-```
-GET /v1/admin/rag/docs
-```
-
-查询知识库物理文档列表。
-
-**查询参数（Query）：**
-- `topic` (string, 可选): 按分类过滤（如 `forge`, `zl_help` 等）
-- `keyword` (string, 可选): 按文件名或相对路径模糊搜索
-
-### 17. 获取知识库文档详情
-
-```
-GET /v1/admin/rag/docs/content?path={relativePath}
-```
-
-读取单个 Markdown/TXT/Log 文件的元信息与正文。
-
-### 18. 新建或保存知识库文档
-
-```
-POST /v1/admin/rag/docs/save
-```
-
-保存或修改文档，采用原子写入。
-
-**请求参数（JSON）：**
-- `topic` (string, 必填): 所属分类目录
-- `filename` (string, 必填): 文件名（如 `example.md`）
-- `content` (string, 必填): Markdown 正文文本
-- `isNew` (bool, 可选): 是否新建（若为 true 且目标文件已存在则报错）
-
-### 19. 上传知识库文档
-
-```
-POST /v1/admin/rag/docs/upload
-```
-
-上传 `.md`、`.txt`、`.log` 文件到指定分类，单个限制 ≤ 5MB。支持 `multipart/form-data`（字段：`file`、`topic`）与直接 JSON 载荷（字段：`topic`、`filename`、`content`）。
-
-### 20. 删除知识库文档
-
-```
-DELETE /v1/admin/rag/docs?path={relativePath}
-POST /v1/admin/rag/docs/delete
-```
-
-安全删除指定知识库文档，受路径遍历白名单保护。
-
-### 21. 客户端与生态来源分布统计
-
-```
-GET /v1/admin/analytics/sources?days=7
-```
-
-参数：
-- `days`: 查询天数（1-90，默认 7）
-
-响应：
-- `days`: 查询天数
-- `total`: 该时间段日志总数
-- `sources`: 来源生态列表（`source`, `count`, `percentage`）
-
-### 22. Minecraft 版本与加载器矩阵
-
-```
-GET /v1/admin/analytics/versions?days=30
-```
-
-参数：
-- `days`: 采样天数（1-90，默认 30）
-
-响应：
-- `versions`: MC 核心版本排行与占比
-- `loaders`: Mod/服务端加载器分布排行与占比
-
-### 23. 日志时序走势大盘
-
-```
-GET /v1/admin/analytics/trends?days=7
-```
-
-参数：
-- `days`: 统计天数（1-30，默认 7）
-
-响应：
-- `trends`: 按日走势列表（`date`, `count`, `bytes`）
-
-### 24. 存储健康度与底层资源诊断
-
-```
-GET /v1/admin/system/storage-health
-```
-
-返回 MariaDB 表数据与索引大小、文件系统磁盘剩余容量、Redis 内存占用与 Key 数量。
-
-### 25. 手动触发过期日志清理
-
-```
-POST /v1/admin/system/cleanup-expired
-```
-
-立即执行底层的 `CleanupExpired()`，返回回收条数与耗时。
-
-### 26. Redis 缓存按需清空
-
-```
-POST /v1/admin/system/cache/flush
-```
-
-请求体：
-- `prefix`: 缓存前缀（默认 `log:*`，支持 `ai:*` 或 `all`）
-
-### 27. 按条件批量下架日志
-
-```
-POST /v1/admin/logs/batch-delete
-```
-
-请求体：
-- `source`: 可选来源过滤
-- `since`: 可选起始时间戳
-- `until`: 可选结束时间戳
-- `keyword`: 可选关键词
-- `limit`: 单次上限（1-1000，默认 500）
-
-### 28. 封禁 IP 清单查询
-
-```
-GET /v1/admin/security/bans
-```
-
-返回当前所有处于封禁状态的 IP 地址、解封时间戳、剩余有效期与封禁原因（合并 Redis 活跃键与 OpenLiteWaf 本地持久化）。
-
-### 29. 手动封禁 IP
-
-```
-POST /v1/admin/security/ban
-```
-
-请求体：
-- `ip`: 目标 IPv4 或 IPv6 地址（必填）
-- `ttl`: 封禁时长（秒，默认 86400）
-- `reason`: 封禁原因备注（可选）
-
-### 30. 手动解除 IP 封禁
-
-```
-POST /v1/admin/security/unban
-```
-
-请求体：
-- `ip`: 目标 IP 地址（必填）
-
-### 31. 边缘防御概览与分类拦截统计
-
-```
-GET /v1/admin/security/overview
-```
-
-返回 OpenLiteWaf 拦截大盘数据，包括累计拦截次数、当前封禁 IP 总量、分类拦截计数（CC、SQL 注入、XSS、目录穿越、RCE/探针等）。
-
-### 32. 获取违规内容过滤规则
-
-```
-GET /v1/admin/security/content-rules
-```
-
-返回当前生效的违规内容过滤开关（`enabled`）、关键词黑名单（`keywords`）和正则表达式规则列表（`patterns`）。
-
-### 33. 更新违规内容过滤规则
-
-```
-PUT /v1/admin/security/content-rules
-```
-
-请求体：
-- `enabled`: 布尔值，是否启用内容过滤
-- `keywords`: 字符串数组，违规关键词列表
-- `patterns`: 字符串数组，违规正则列表
-
-### 34. AI 智能分析运营指标查询
-
-```
-GET /v1/admin/ai/metrics?days=7
-```
-
-参数：
-- `days`: 统计天数（1-30，默认 7）
-
-响应：
-- `summary`: 核心运营总览（总分析请求数、成功/失败数、成功率、平均耗时、P50/P90/P99 耗时、Token 输入/输出/总计预估、RAG 检索调用次数）
-- `trends`: 按日分析吞吐量与平均耗时走势
-- `topics`: 知识库 Top 命中 Topic 排行及占比
-- `durationDistribution`: 响应耗时分布区间统计（极速、正常、较长、深度推理）
-
-### 35. AI 微队列深层探查
-
-```
-GET /v1/admin/ai/queue/inspect?limit=20
-```
-
-返回队列暂停消费状态、当前排队深度、活跃消费者 Workers 状态与 pending 消息、在途待处理任务列表（等待时长、重试次数）以及死信任务记录。
-
-### 36. 暂停 AI 微队列消费
-
-```
-POST /v1/admin/ai/queue/pause
-```
-
-手动暂停消费者进程拉取新任务（适合上游 LLM 额度超标或突发故障时运维干预），任务仍可入队但暂缓消费。
-
-### 37. 恢复 AI 微队列消费
-
-```
-POST /v1/admin/ai/queue/resume
-```
-
-解除暂停标记，消费者协程立即恢复拉取积压任务。
-
-### 38. 一键安全排空积压队列
-
-```
-POST /v1/admin/ai/queue/flush
-```
-
-立即移除当前队列中积压待处理的任务，释放中继连接并从 Redis Stream 中 ACK 与删除。返回清理条数 `{"cleared": N}`。
-
-### 39. 清空死信任务列表
-
-```
-POST /v1/admin/ai/queue/dead/clear
-```
-
-清空所有被判定为死信的任务记录。
-
-### 40. 获取 SpinYarn 映射状态与本地映射库清单
-
-```
-GET /v1/admin/spinyarn/status
-```
-
-返回 SpinYarn PHP 扩展加载状态、版本、本地 `mappings/` 目录路径以及 Yarn 与 Vanilla 映射文件列表与大小统计。
-
-### 41. SpinYarn 在线反混淆测试探针
-
-```
-POST /v1/admin/spinyarn/test
-```
-
-测试混淆类名与方法的实时反混淆解析能力。
-
-**请求体（JSON）：**
-```json
-{
-    "content": "java.lang.NullPointerException\n\tat net.minecraft.class_310.method_1508",
-    "version": "1.20.1",
-    "mapping_type": "yarn"
-}
-```
-
-**响应示例：**
-```json
-{
-    "success": true,
-    "message": "SpinYarn deobfuscation test completed",
-    "data": {
-        "success": true,
-        "available": true,
-        "changed": true,
-        "version": "1.20.1",
-        "mappingType": "yarn",
-        "durationMs": 4,
-        "original": "...",
-        "deobfuscated": "..."
-    }
-}
-```
-
-### 42. 分页获取操作审计日志
-
-```
-GET /v1/admin/audit/logs?page=1&pageSize=20&action=log.delete&keyword=s123456
-```
-
-支持按动作代号（`action`）、关键词（`keyword`）与时间戳范围（`since`/`until`）筛选检索管理员高危运维操作记录（包含删除、封禁、解封、规则修改、队列控制等）。
-
-### 43. 清空操作审计日志
-
-```
-DELETE /v1/admin/audit/logs
-```
-
-清空 Redis 环形缓冲区及本地审计日志文件。返回清空条数 `{"cleared": N}`。
-
-### 44. 获取统一事件队列状态与监控指标
-
-```
-GET /v1/admin/event-queue/stats
-```
-
-查看统一日志异步事件队列（EventQueue）的流状态、当前注册的所有监听器列表、排队积压深度（Lag + Pending）、累计吞吐指标与死信条目数。
-
-**响应示例：**
-
-```json
-{
-    "success": true,
-    "message": "Event queue stats retrieved successfully",
-    "enabled": true,
-    "stream": "events:log:stream",
-    "group": "log-event-workers",
-    "maxAttempts": 3,
-    "backlog": 0,
-    "pending": 0,
-    "streamLength": 12,
-    "deadLetters": 0,
-    "counters": {
-        "dispatched": 1420,
-        "processed_success": 1419,
-        "processed_failed": 1
-    },
-    "registeredEvents": {
-        "log.uploaded": [
-            { "name": "security_audit", "priority": 100 },
-            { "name": "deobfuscate", "priority": 50 }
-        ],
-        "log.security_audit": [
-            { "name": "security_audit", "priority": 100 }
-        ],
-        "log.deobfuscate": [
-            { "name": "deobfuscate", "priority": 100 }
-        ]
-    }
-}
-```
-
-### 45. 分页获取死信任务列表
-
-```
-GET /v1/admin/event-queue/dead?limit=50
-```
-
-查看重试上限耗尽或遇到不可恢复异常的死信任务列表，包含原始事件、负载、重试次数及失败异常原因。
-
-**响应示例：**
-
-```json
-{
-    "success": true,
-    "message": "Dead letters retrieved successfully",
-    "total": 1,
-    "items": [
-        {
-            "streamId": "1726912345678-0",
-            "id": "evt_66edfe123456",
-            "event": "log.uploaded",
-            "payload": {
-                "logId": "sAbCdEf",
-                "clientIp": "198.51.100.2"
-            },
-            "attempts": 3,
-            "error": "Connection timed out after 3 retries",
-            "failedAt": 1726912345.678
-        }
-    ]
-}
-```
-
-### 46. 重放死信任务
-
-```
-POST /v1/admin/event-queue/dead/retry
-```
-
-将特定死信任务重置尝试次数后重新推入主事件流 `events:log:stream` 进行消费，并从死信流中清除。
-
-**请求参数（JSON）：**
-
-```json
-{
-    "streamId": "1726912345678-0"
-}
-```
-
-**响应示例：**
-
-```json
-{
-    "success": true,
-    "message": "Dead letter retried successfully",
-    "streamId": "1726912345678-0",
-    "retried": true
-}
-```
-
-### 47. 清空死信队列
-
-```
-DELETE /v1/admin/event-queue/dead
-```
-
-物理清空死信流 `events:log:dead`。返回 `{"cleared": true}`。
-
----
-
 
 ## 通用响应格式
 
@@ -1245,9 +275,8 @@ DELETE /v1/admin/event-queue/dead
 
 ```json
 {
-    "success": true,
-    "message": "OK",
-    ...
+  "success": true,
+  "message": "OK"
 }
 ```
 
@@ -1255,9 +284,9 @@ DELETE /v1/admin/event-queue/dead
 
 ```json
 {
-    "success": false,
-    "error": "错误描述",
-    "code": 400
+  "success": false,
+  "error": "错误描述",
+  "code": 400
 }
 ```
 
@@ -1265,13 +294,13 @@ DELETE /v1/admin/event-queue/dead
 
 | 状态码 | 说明 |
 |--------|------|
-| 200 | 请求成功 |
+| 200 | 请求成功；多文件列表也返回 200 |
 | 400 | 请求参数错误 |
-| 401 | 缺少或无效的认证信息 |
-| 403 | 权限不足（Token 不匹配） |
-| 404 | 日志不存在 |
+| 401 | 缺少认证信息 |
+| 403 | 权限不足或 IP 被封禁 |
+| 404 | 日志或文件不存在 |
 | 405 | 请求方法不允许 |
-| 413 | 请求体过大 |
+| 413 | 请求体或文件总量过大 |
 | 415 | 不支持的 Content-Type 或 Content-Encoding |
 | 429 | 速率限制触发 |
 | 500 | 服务器内部错误 |

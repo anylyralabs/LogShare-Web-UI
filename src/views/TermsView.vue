@@ -5,7 +5,6 @@ import {
   PhScroll as Scroll,
   PhShieldCheck as ShieldCheck,
   PhWarningOctagon as WarningOctagon,
-  PhBrain as Brain,
   PhFileCode as FileCode,
   PhScales as Scale,
   PhCheckCircle as CheckCircle,
@@ -29,17 +28,17 @@ const sections = [
   { id: 'services', title: '二、平台服务定位与功能', icon: FileCode },
   { id: 'rules', title: '三、用户使用规范与合规红线', icon: WarningOctagon },
   { id: 'content', title: '四、数据提交、权属与许可', icon: CheckCircle },
-  { id: 'ai-disclaimer', title: '五、AI 诊断与 Codex 规则免责声明', icon: Brain },
+  { id: 'analysis-disclaimer', title: '五、Codex 规则分析免责声明', icon: FileCode },
   { id: 'liability', title: '六、服务可用性与有限责任', icon: ShieldCheck },
   { id: 'governing-law', title: '七、协议修订与管辖法律', icon: Scale }
 ]
 </script>
 
 <template>
-  <div class="container mx-auto min-w-0 max-w-4xl overflow-x-clip px-3 py-6 md:py-8">
+  <div class="container mx-auto min-w-0 max-w-3xl overflow-x-clip px-4 py-8">
     <!-- 顶部状态栏与切换选项卡 -->
     <div
-      class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-border pb-4"
+      class="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-border/60 pb-5"
     >
       <div>
         <div class="flex items-center gap-2">
@@ -49,9 +48,9 @@ const sections = [
             <Scroll weight="duotone" class="h-3.5 w-3.5" />
             法律协议与合规
           </span>
-          <span class="text-xs text-muted-foreground">生效日期：2026 年 9 月 13 日</span>
+          <span class="text-xs text-muted-foreground">生效日期：2026 年 11 月 1 日</span>
         </div>
-        <h1 class="mt-2 text-2xl md:text-3xl font-bold tracking-tight text-foreground">
+        <h1 class="mt-2 text-3xl font-bold tracking-tight text-foreground">
           {{ t('terms_of_service') }}
         </h1>
         <p class="mt-1 text-sm text-muted-foreground">
@@ -79,7 +78,7 @@ const sections = [
     </div>
 
     <!-- 目录快速跳转与概览 -->
-    <div class="mb-8 rounded-xl border border-border/80 bg-card p-4 shadow-sm">
+    <div class="mb-8 rounded-lg border border-border/80 bg-card p-4">
       <div
         class="mb-2.5 flex items-center justify-between text-xs font-semibold text-muted-foreground"
       >
@@ -105,7 +104,7 @@ const sections = [
     </div>
 
     <!-- 条款正文区 -->
-    <div class="space-y-10 text-sm leading-relaxed text-foreground">
+    <div class="space-y-10 text-sm leading-7 text-foreground">
       <!-- 一、导言与协议接纳 -->
       <section id="acceptance" class="scroll-mt-20 space-y-3">
         <h2
@@ -156,10 +155,6 @@ const sections = [
             <strong class="text-foreground">Codex 规则库与模式匹配分析：</strong>
             由服务端高效模式识别算法自动提取崩溃根因、Mod 依赖缺失及环境信息（如 Java
             版本、游戏核心架构等）；
-          </li>
-          <li>
-            <strong class="text-foreground">LogAgent 智能辅助诊断（AI）：</strong>
-            基于多模型协同与专业知识库（RAG），结合智能日志局部探测工具，为难以直观排查的疑难崩溃提供针对性分析建议；
           </li>
           <li>
             <strong class="text-foreground">开放 HTTP RESTful API：</strong>
@@ -228,8 +223,7 @@ const sections = [
           </p>
           <p>
             <strong class="text-foreground">2. 服务运营许可：</strong>
-            为实现日志分享、错误定位、页面渲染及 AI
-            诊断服务，您授予本平台全球范围内的、非独占的、免许可费用的技术使用许可，仅限于本平台内部进行安全扫描、缓存存储、文本切片、多端格式化渲染以及传递给诊断分析引擎处理。
+            为实现日志分享、错误定位与页面渲染，您授予本平台全球范围内的、非独占的、免许可费用的技术使用许可，仅限于本平台内部进行安全扫描、缓存存储、文本切片、多端格式化渲染以及执行 Codex 结构化分析。
           </p>
           <p>
             <strong class="text-foreground">3. 敏感数据脱敏倡议：</strong>
@@ -248,28 +242,26 @@ const sections = [
         </div>
       </section>
 
-      <!-- 五、AI 诊断与 Codex 规则免责声明 -->
-      <section id="ai-disclaimer" class="scroll-mt-20 space-y-3">
+      <!-- 五、Codex 规则分析免责声明 -->
+      <section id="analysis-disclaimer" class="scroll-mt-20 space-y-3">
         <h2
           class="flex items-center gap-2 text-lg font-bold tracking-tight text-foreground border-b border-border/60 pb-2"
         >
-          <Brain weight="duotone" class="h-5 w-5 text-primary" />
-          五、AI 诊断与 Codex 规则免责声明
+          <FileCode weight="duotone" class="h-5 w-5 text-primary" />
+          五、Codex 规则分析免责声明
         </h2>
         <div class="space-y-2 text-muted-foreground">
           <p>
-            本平台所提供的 Codex 规则识别与 LogAgent
-            大语言模型诊断仅作为<strong>辅助排查工具与技术参考建议</strong>，绝不构成任何确定性的技术担保或官方实施承诺：
+            本平台提供的 Codex 规则识别与结构化分析仅作为<strong>辅助排查工具与技术参考建议</strong>，不构成任何确定性的技术担保或官方实施承诺：
           </p>
           <ul class="list-disc pl-5 space-y-1 text-xs text-muted-foreground">
             <li>
-              <strong class="text-foreground">生成内容的局限性：</strong>
-              人工智能分析基于已有上下文与知识库模式进行推理，可能存在幻觉、未预见的误报或方案不匹配；
+              <strong class="text-foreground">分析结果的局限性：</strong>
+              规则与模式匹配基于既有日志上下文，可能存在误报、漏报或方案不匹配；
             </li>
             <li>
               <strong class="text-foreground">操作责任自负：</strong>
-              在采纳 AI
-              或诊断结果对生产服务器、游戏存档、核心配置文件进行增删或升级操作前，您有责任进行充分验证并在本地完成完整数据备份。因直接套用诊断建议造成的存档损坏、服务器故障或数据丢失，本平台不承担任何法律与经济责任。
+              在采纳诊断结果对生产服务器、游戏存档、核心配置文件进行增删或升级操作前，您有责任进行充分验证并在本地完成完整数据备份。因直接套用诊断建议造成的存档损坏、服务器故障或数据丢失，本平台不承担任何法律与经济责任。
             </li>
           </ul>
         </div>

@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { apiClient, type LogMetaResponse } from '@/lib/ApiClient'
 import { parseLog } from '@/lib/logParser'
+import type { ParsedLogRow } from '@/lib/logParser.types'
 import { setPageTitle } from '@/lib/pageTitle'
 import { t } from '@/lib/i18n'
 import { toast } from '@/lib/toast'
@@ -10,7 +11,8 @@ export function useLogViewer(logId: string) {
   const router = useRouter()
   const log = ref<any>(null)
   const logMeta = ref<LogMetaResponse | null>(null)
-  const logContent = ref('')
+  const logRows = ref<ParsedLogRow[]>([])
+  const logFallbackHtml = ref('')
   const loading = ref(true)
   const error = ref('')
   const showErrorsOnly = ref(false)
@@ -23,12 +25,18 @@ export function useLogViewer(logId: string) {
   const isEditingFontSize = ref(false)
   const fontSizeInput = ref('12')
   const originalLogText = ref('')
-  const mainRawText = ref('')
+  const selectedFile = ref('')
+  const fileSwitching = ref(false)
   const problemsSection = ref<HTMLElement | null>(null)
 
   const addNotification = (type: 'success' | 'error', message: string) => {
     if (type === 'success') toast.success(message)
     else toast.error(message)
+  }
+
+  const setLogResult = (rows: ParsedLogRow[], fallbackHtml = '') => {
+    logRows.value = rows
+    logFallbackHtml.value = fallbackHtml
   }
 
   const init = () => {
@@ -42,36 +50,42 @@ export function useLogViewer(logId: string) {
     }
   }
 
+  const loadFile = async (name: string, scrollToTop = false) => {
+    const rawText = await apiClient.getRawFile(logId, name)
+    selectedFile.value = name
+    originalLogText.value = rawText
+    setLogResult(await parseLog(rawText))
+    log.value = null
+    setPageTitle('log', { id: logId })
+
+    if (scrollToTop) {
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+    }
+
+    // 分析按文件懒加载，不阻塞正文展示
+    apiClient
+      .getInsightsFile(logId, name)
+      .then(insights => {
+        if (selectedFile.value !== name) return
+        log.value = insights
+        if (insights?.title) {
+          setPageTitle('log', { title: insights.title, id: logId })
+        }
+      })
+      .catch(e => {
+        console.warn('Failed to load insights:', e)
+      })
+  }
+
   const loadLog = async () => {
     try {
-      const rawRes = await apiClient.get(`/v1/raw/${logId}`)
-      const rawText = typeof rawRes.data === 'string' ? rawRes.data : JSON.stringify(rawRes.data)
-
-      mainRawText.value = rawText
-      originalLogText.value = rawText
-      logContent.value = await parseLog(rawText)
-
-      // 分析结果为可选增强，失败时静默降级（正文照常展示）
-      try {
-        const insightsRes = await apiClient.get(`/v1/insights/${logId}`)
-        log.value = insightsRes.data
-      } catch (e) {
-        console.warn('Failed to load insights:', e)
-        log.value = null
+      const meta = await apiClient.getLogMeta(logId)
+      logMeta.value = meta
+      const firstFile = meta.files?.[0]
+      if (!firstFile) {
+        throw new Error(t('log_load_failed'))
       }
-
-      if (log.value?.title) {
-        setPageTitle('log', { title: log.value.title, id: logId })
-      } else {
-        setPageTitle('log', { id: logId })
-      }
-
-      // 附加元信息与文件列表（独立请求，失败不阻塞正文展示）
-      try {
-        logMeta.value = await apiClient.getLogMeta(logId)
-      } catch (e) {
-        console.warn('Failed to load log meta:', e)
-      }
+      await loadFile(firstFile.name)
     } catch (e: any) {
       console.error('Failed to load log:', e)
       const status = e.response?.status
@@ -87,18 +101,15 @@ export function useLogViewer(logId: string) {
     }
   }
 
-  /** 切换正文渲染为指定文本（附加文件查看） */
-  const applyRawText = async (text: string) => {
-    originalLogText.value = text
-    logContent.value = await parseLog(text)
-    window.scrollTo({ top: 0, behavior: 'smooth' })
-  }
-
-  /** 恢复渲染主文件 */
-  const restoreMain = async () => {
-    if (!mainRawText.value) return
-    originalLogText.value = mainRawText.value
-    logContent.value = await parseLog(mainRawText.value)
+  /** 切换当前查看的文件，并同步该文件的 Codex 分析 */
+  const selectFile = async (name: string) => {
+    if (!name) return
+    fileSwitching.value = true
+    try {
+      await loadFile(name, true)
+    } finally {
+      fileSwitching.value = false
+    }
   }
 
   const toggleErrors = () => {
@@ -137,10 +148,9 @@ export function useLogViewer(logId: string) {
   }
 
   const copyShareMessage = async () => {
-    if (!log.value || !log.value.title) {
+    if (!log.value?.title && selectedFile.value) {
       try {
-        const insightsRes = await apiClient.get(`/v1/insights/${logId}`)
-        log.value = insightsRes.data
+        log.value = await apiClient.getInsightsFile(logId, selectedFile.value)
       } catch (e) {
         console.error('Failed to load analysis for share message:', e)
       }
@@ -175,7 +185,7 @@ export function useLogViewer(logId: string) {
     const url = window.URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.setAttribute('download', `${logId}.log`)
+    link.setAttribute('download', selectedFile.value.split('/').pop() || `${logId}.log`)
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
@@ -233,7 +243,9 @@ export function useLogViewer(logId: string) {
   return {
     log,
     logMeta,
-    logContent,
+    logRows,
+    logFallbackHtml,
+    setLogResult,
     loading,
     error,
     showErrorsOnly,
@@ -246,11 +258,12 @@ export function useLogViewer(logId: string) {
     isEditingFontSize,
     fontSizeInput,
     originalLogText,
+    selectedFile,
+    fileSwitching,
     problemsSection,
     init,
     loadLog,
-    applyRawText,
-    restoreMain,
+    selectFile,
     toggleErrors,
     deleteLog,
     copyShareMessage,

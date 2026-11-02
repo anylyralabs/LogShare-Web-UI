@@ -50,7 +50,7 @@ export const parseZipFile = async (file: File): Promise<ExtractedFile[]> => {
           contents.push({
             name: entry.name.split('/').pop() || relativePath,
             content,
-            size: content.length,
+            size: new TextEncoder().encode(content).length,
             path: relativePath
           })
         } catch (e) {

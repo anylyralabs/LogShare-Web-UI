@@ -264,9 +264,6 @@ export default defineConfig({
       output: {
         manualChunks: id => {
           if (id.includes('node_modules')) {
-            if (id.includes('markdown-it')) {
-              return 'markdown'
-            }
             if (/node_modules[\\/](@vue|vue|vue-router)[\\/]/.test(id)) {
               return 'vue-core'
             }

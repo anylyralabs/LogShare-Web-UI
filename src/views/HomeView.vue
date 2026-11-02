@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { apiClient } from '@/lib/ApiClient'
+import { apiClient, type LogSubmitResponse } from '@/lib/ApiClient'
 import { useRouter } from 'vue-router'
 import { t } from '@/lib/i18n'
 import { toast } from '@/lib/toast'
@@ -26,6 +26,9 @@ import {
   PhCheckSquare as SquareCheckBig,
   PhTrash as Trash2
 } from '@phosphor-icons/vue'
+
+const MAX_TOTAL_BYTES = 20 * 1024 * 1024
+const MAX_REQUEST_BYTES = 32 * 1024 * 1024
 
 const content = ref('')
 const loading = ref(false)
@@ -145,9 +148,11 @@ const onFileSelected = async (event: Event) => {
 }
 
 const handleFile = async (file: File) => {
-  // 与后端限制对齐：10 MiB（/v1/limits maxLength）
-  if (file.size > 10 * 1024 * 1024) {
-    error.value = t('file_too_large_10mib')
+  // 纯文件模型：单文件不限大小，但请求体与展开后的总大小有上限
+  const archive = isArchiveFile(file.name)
+  const limit = archive ? MAX_REQUEST_BYTES : MAX_TOTAL_BYTES
+  if (file.size > limit) {
+    error.value = t(archive ? 'archive_too_large_32mib' : 'file_too_large_20mib')
     return
   }
 
@@ -226,17 +231,30 @@ const saveLogToken = (id: string | null, token: string | null | undefined) => {
   }
 }
 
+const goToUploadedLog = (result: LogSubmitResponse) => {
+  if (!result.success || !result.id) {
+    throw new Error(result.message || t('unknown_error'))
+  }
+  // 去重命中时返回的是既有日志，token 为本次新生成且不能用于删除，不能覆盖首次上传者的凭证
+  if (result.deduplicated) {
+    toast.success(t('log_deduplicated'))
+  } else {
+    saveLogToken(result.id, result.token)
+  }
+  router.push(`/${result.id}`)
+}
+
 const uploadAllFiles = async () => {
   if (extractedFiles.value.length === 0) return
 
-  // 服务端限制：文件数 ≤200，解压后累计 ≤12MB
+  // 服务端限制：文件数 ≤200，展开后合计 ≤20 MiB
   if (extractedFiles.value.length > 200) {
     error.value = t('too_many_files')
     return
   }
   const totalSize = extractedFiles.value.reduce((sum, f) => sum + f.size, 0)
-  if (totalSize > 12 * 1024 * 1024) {
-    error.value = t('files_too_large_12mb')
+  if (totalSize > MAX_TOTAL_BYTES) {
+    error.value = t('files_too_large_20mb')
     return
   }
 
@@ -246,7 +264,6 @@ const uploadAllFiles = async () => {
 
   try {
     const main = extractedFiles.value[0]!
-    // 不传 content：服务端取 files[0] 作为主文件，meta.files 与下拉列表保持一致
     const result = await apiClient.submitLog({
       files: extractedFiles.value.map(f => ({ name: f.path || f.name, content: f.content })),
       metadata: [
@@ -266,12 +283,7 @@ const uploadAllFiles = async () => {
       source: 'web-upload'
     })
 
-    if (result.success && result.id) {
-      saveLogToken(result.id, result.token)
-      router.push(`/${result.id}`)
-    } else {
-      throw new Error(result.message || t('unknown_error'))
-    }
+    goToUploadedLog(result)
   } catch (e: any) {
     console.error('Upload error:', e)
     error.value =
@@ -289,27 +301,28 @@ const save = async () => {
   error.value = ''
 
   try {
+    const fileName = pendingFileName.value || 'log.txt'
     const result = await apiClient.submitLog({
-      content: content.value,
+      files: [{ name: fileName, content: content.value }],
       metadata: [
         {
           key: 'filename',
-          value: pendingFileName.value || 'log.txt',
+          value: fileName,
           label: '文件名',
           visible: false
         },
-        { key: 'size', value: content.value.length, label: '文件大小', visible: false }
+        {
+          key: 'size',
+          value: new TextEncoder().encode(content.value).length,
+          label: '文件大小',
+          visible: false
+        }
       ],
       source: 'web-upload'
     })
 
-    if (result.success && result.id) {
-      saveLogToken(result.id, result.token)
-      pendingFileName.value = ''
-      router.push(`/${result.id}`)
-    } else {
-      throw new Error(result.message || t('unknown_error'))
-    }
+    goToUploadedLog(result)
+    pendingFileName.value = ''
   } catch (e: any) {
     console.error(e)
     error.value =
