@@ -13,6 +13,7 @@ Minecraft / Hytale 日志分享与分析前端。支持日志上传、Codex 在�
 - **深色模式** — 支持明暗主题切换，跟随系统偏好
 - **国际化** — 简体中文 / 繁體中文
 - **API 文档** — 内置 API 文档，提供 cURL 示例及 JS / PHP / Java / .NET SDK 下载
+- **访问统计** — 生产站点接入 OpenLiteStats：页面浏览、路由、Web Vitals 与前端错误（开发/预览不加载）
 
 ## 技术栈
 

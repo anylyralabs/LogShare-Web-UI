@@ -29,6 +29,14 @@ Vue 3 + TypeScript 5 + Vite 7 前端，Minecraft/Hytale 日志分享与分析平
 - 客户端入口是 `createApp`（不是 `hydrate`），SSG 只负责首屏 HTML/SEO；不要假设客户端会水合服务端 DOM。
 - `scripts/prerender.mjs` 对单个页面失败只打印 `✗`，不会让构建非零退出；新增页面后检查输出中的 `✓` 列表。
 
+## 访问统计（OpenLiteStats）
+
+- 统计接入在 `src/lib/stats.ts`，由 `src/main.ts` 在 `app.use(router)` 后调用 `initStats(router)`；不要在 `index.html` 再挂一份自动脚本，否则会与 router 上报重复。
+- 只在生产构建且 hostname 为 `logshare.cn` / `www.logshare.cn` 时启用；开发、预览与 SSG 预渲染（Node）不会加载 SDK。临时开启用 `VITE_OPENLITESTATS_ENABLED=true`。
+- SDK 文件默认 `https://api.logshare.cn/stats/sdk/1.3.0/openlitestats.min.js`，采集端点 `https://api.logshare.cn/stats/collect`，站点标识 `logshare-web`；可用 `VITE_OPENLITESTATS_SDK_URL` / `VITE_OPENLITESTATS_ENDPOINT` 覆盖。
+- 使用 IIFE 全局 `window.OpenLiteStats.createOpenLiteStats`，`autoPageview` / `autoHistory` 必须保持 `false`：首屏由 `router.isReady()` 上报，后续由 `router.afterEach` 上报。Web Vitals 与未捕获错误由 SDK 自动接管。
+- 升级后端 OpenLiteStats 版本时同步修改 `SDK_URL` 的版本段；先部署后端 SDK 静态文件，再发前端，避免 404。统计失败不得影响页面渲染。
+
 ## PWA
 
 - 更新链路唯一：`src/main.ts` 的 `updatefound` → `window.dispatchEvent(new CustomEvent('pwa-update-available'))` → `src/components/PwaUpdateToast.vue` 监听。改动需保留事件名与载荷。
@@ -43,7 +51,7 @@ Vue 3 + TypeScript 5 + Vite 7 前端，Minecraft/Hytale 日志分享与分析平
 ## API 层
 
 - 业务 HTTP 统一走 `src/lib/ApiClient.ts`。`baseURL` 在 dev 为空（走 `/v1` 代理），生产为 `https://api.logshare.cn`。
-- AI 深度分析已由外部服务承接；本前端不再包含 AI 面板、SSE 客户端或遥测 SDK。
+- AI 深度分析已由外部服务承接；本前端不再包含 AI 面板、SSE 客户端或业务遥测 SDK（访问统计 SDK 是例外，见「访问统计」）。
 - v1.8.5 起日志由文件列表组成：`POST /v1/log` 接受 `files`，同时兼容旧版 `content`（非空时映射为主文件，两者至少提供一个）；上传与元信息响应包含顶层 `raw`（单文件指向 `/v1/raw/{id}`；上传响应多文件指向 content 主文件，元信息响应多文件指向按名称排序的第一个文件）。`GET /v1/log/{id}` 返回 `files`/`requiresFileSelection`；多文件时 `GET /v1/raw/{id}` 与 `GET /v1/insights/{id}` 返回 200 + 文件列表，必须改用 `/{filename}` 端点。`POST /v1/analyse` 已移除。
 - 其他端点：`DELETE /v1/log/{id}`（多 ID 逗号分隔，Bearer token）、`GET /v1/limits`、`GET /`。后端已移除 `/v1/ai/*`、`/v1/filters`、`/v1/telemetry/report`，不要重新引入。
 - `GET /v1/limits` 当前契约是 `storageTime` / `maxFiles` / `maxTotalBytes` / `maxRequestBodyBytes`；旧线上实例可能仍返回 `maxLength` / `maxLines`，不要把它们写进新契约。`GET /v1/log/{id}` 不续期；raw/insights 的任意成功读取（包括多文件列表）会续期。
